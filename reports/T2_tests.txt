@@ -1,0 +1,2 @@
+tests/test_build_recursive.sh : PASS
+tests/test_init.sh : PASS
