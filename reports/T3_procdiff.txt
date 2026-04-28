@@ -1,0 +1,21 @@
+===RAPORT DB_DIFF===
+DB type: PRCI
+Old snapshot_id: 1777216101
+New snapshot_id: 1777216104
+Old record count: 349
+New record count: 347
+===APARUTE===
+PID 4121 (proc_snapshot)
+PID 4122 (proc_snapshot)
+PID 4123 (proc_snapshot)
+===DISPARUTE===
+PID 4099 (proc_snapshot)
+PID 4100 (proc_snapshot)
+PID 4101 (proc_snapshot)
+PID 4102 (proc_snapshot)
+PID 4103 (proc_snapshot)
+===MODIFICATE===
+PID 3024 (tracker-miner-f)
+ rss: 33220 KB -> 37932 KB
+PID 4089 (tracker-extract)
+ rss: 29772 KB -> 31132 KB
