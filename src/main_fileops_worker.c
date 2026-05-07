@@ -1,0 +1,56 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include "../include/ipc_format.h"
+
+int main(int argc, char *argv[]) {
+    int worker_id = -1;
+    char *ipc_path = NULL;
+
+    // 1. Parsarea argumentelor venite din exec()
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--worker-id") == 0 && i + 1 < argc) worker_id = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--ipc") == 0 && i + 1 < argc) ipc_path = argv[++i];
+    }
+
+    if (worker_id == -1 || !ipc_path) {
+        fprintf(stderr, "[Worker] Eroare: Argumente de lansare lipsa.\n");
+        return 1;
+    }
+
+    printf("[Worker %d] Lansat in executie. Atasare la canalul %s...\n", worker_id, ipc_path);
+
+    // 2. Maparea la aceeasi zona IPC partajata
+    int fd = open(ipc_path, O_RDWR);
+    if (fd == -1) { 
+        perror("[Worker] Eroare deschidere IPC"); 
+        return 1; 
+    }
+
+    ipc_shared_t *ipc = mmap(NULL, sizeof(ipc_shared_t), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (ipc == MAP_FAILED) { 
+        perror("[Worker] Eroare mmap pe memorie partajata"); 
+        close(fd); return 1; 
+    }
+    close(fd);
+
+    // 3. Verificarea legaturii
+    if (strncmp(ipc->magic, "IPC4", 4) == 0) {
+        printf("[Worker %d] Conectat. Magic number IPC4 confirmat.\n", worker_id);
+    } else {
+        printf("[Worker %d] Eroare la citirea structurii comune!\n", worker_id);
+    }
+
+    // ... aici vom integra in Commit 2 logica efectiva de cautare in bucla while() ...
+
+    // 4. Eliberarea resurselor locale inainte de exit
+    if (munmap(ipc, sizeof(ipc_shared_t)) == -1) {
+        perror("[Worker] Eroare munmap la iesire");
+    }
+    
+    printf("[Worker %d] Ciclu de viata incheiat. Gata pentru exit.\n", worker_id);
+    return 0;
+}
