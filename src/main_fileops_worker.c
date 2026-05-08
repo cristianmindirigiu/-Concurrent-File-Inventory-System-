@@ -43,8 +43,46 @@ int main(int argc, char *argv[]) {
     } else {
         printf("[Worker %d] Eroare la citirea structurii comune!\n", worker_id);
     }
+    
+    job_t my_job;
+    while(1){
+	// verificare conditie de terminare (nu mai este sursa de joburi noi)
+	sem_wait(&ipc->job_queue.mutex);
+	if(ipc->job_queue.count == 0 && ipc->job_queue.jobs_in_progress == 0){
+		sem_post(&ipc->job_queue.mutex);
+		break;
+	}
+	sem_post(&ipc->job_queue.mutex);
 
-    // ... aici vom integra in Commit 2 logica efectiva de cautare in bucla while() ...
+	sem_wait(&ipc->job_queue.slots_ocupate);
+
+	// verificare pt semnal fals de la manager (dupa sem_post)
+	// previne workerul din a citi din coada goala
+	sem_wait(&ipc->job_queue.mutex);
+	if(ipc->job_queue.count == 0){
+		sem_post(&ipc->job_queue.mutex);
+		break;
+	}
+
+	my_job = ipc->job_queue.buffer[ipc->job_queue.head];
+	ipc->job_queue.head = (ipc->job_queue.head + 1) % JOB_QUEUE_CAPACITY;
+	ipc->job_queue.count--;
+	ipc->job_queue.jobs_in_progress++;
+	sem_post(&ipc->job_queue.mutex);
+	sem_post(&ipc->job_queue.slots_libere);
+	
+	//afisare
+	printf("[Worker %d] Am preluat jobul : %s (depth = %u)\n", worker_id, my_job.path, my_job.depth);
+	
+	//marchez ca am terminat acest job
+	sem_wait(&ipc->job_queue.mutex);
+	ipc->job_queue.jobs_in_progress--;
+	sem_post(&ipc->job_queue.mutex);
+
+    }
+    
+    
+
 
     // 4. Eliberarea resurselor locale inainte de exit
     if (munmap(ipc, sizeof(ipc_shared_t)) == -1) {

@@ -54,6 +54,68 @@ int main(int argc, char *argv[]) {
     memcpy(ipc->magic, "IPC4", 4);
     ipc->num_workers = num_workers;
     ipc->terminate_flag = false;
+    
+
+    ipc->version = IPC_VERSION;
+
+    //INITIALIZARE SEMAFOARE
+    sem_init(&ipc->header_mutex, 1, 1);
+
+    //job queue
+    ipc->job_queue.head = 0;
+    ipc->job_queue.tail = 0;
+    ipc->job_queue.count = 0;
+    ipc->job_queue.jobs_in_progress = 0;
+
+    sem_init(&ipc->job_queue.mutex, 1,1);
+    sem_init(&ipc->job_queue.slots_libere, 1 , JOB_QUEUE_CAPACITY);
+    sem_init(&ipc->job_queue.slots_ocupate, 1, 0);
+
+    // result channels (1 pt fiecare worker)
+    for(uint32_t i = 0; i < num_workers; i++){
+	ipc->result_channels[i].head = 0;
+	ipc->result_channels[i].tail = 0;
+	ipc->result_channels[i].count = 0;
+	ipc->result_channels[i].closed = false;
+
+	sem_init(&ipc->result_channels[i].mutex, 1, 1);
+	sem_init(&ipc->result_channels[i].slots_libere, 1 , RESULT_CHANNEL_CAPACITY);
+	sem_init(&ipc->result_channels[i].slots_ocupate, 1 , 0);	
+
+
+    }
+
+
+    //worker stats
+    for(uint32_t i = 0; i < num_workers; i++){
+	ipc->worker_stats[i].worker_id = i;
+	ipc->worker_stats[i].pid = 0;
+	ipc->worker_stats[i].exit_status = 0;
+	ipc->worker_stats[i].jobs_processed = 0;
+	ipc->worker_stats[i].files_emitted = 0;
+	ipc->worker_stats[i].bytes_sum = 0;
+	ipc->worker_stats[i].time_ms = 0;
+	ipc->worker_stats[i].user_cpu_t = 0;
+	ipc->worker_stats[i].sys_cpu_t = 0;
+	ipc->worker_stats[i].active = true;
+
+    }
+    printf("[Manager] Semafoare si structuri initializate\n");
+    
+
+    //adaugare job in job_queue
+    printf("[Manager] Adaug jobul in coada: %s\n", root_dir);
+
+    sem_wait(&ipc->job_queue.slots_libere); //astept un loc liber
+    sem_wait(&ipc->job_queue.mutex);
+    strncpy(ipc->job_queue.buffer[ipc->job_queue.tail].path, root_dir, MAX_PATH_LEN - 1); //scrie jobul la
+											  //buffer[tail]
+    ipc->job_queue.buffer[ipc->job_queue.tail].path[MAX_PATH_LEN - 1] = '\0';  // siguranta
+    ipc->job_queue.buffer[ipc->job_queue.tail].depth = 0; 
+    ipc->job_queue.tail = (ipc->job_queue.tail + 1) % JOB_QUEUE_CAPACITY;
+    ipc->job_queue.count++;
+    sem_post(&ipc->job_queue.mutex); //elibereaza exclusivitatea
+    sem_post(&ipc->job_queue.slots_ocupate); //anunta ca exista un job de luat
 
     // 3. Crearea si lansarea workerilor prin fork() + execl()
     for (int i = 0; i < num_workers; i++) {
@@ -76,6 +138,25 @@ int main(int argc, char *argv[]) {
             exit(1);
         }
     }
+	
+    usleep(10000); //pentru atunci cand managerul ajunge la loopul de supraveghere inainte ca workerii sa   porneasca si sa incrementeze jobs_in_progress	
+    //loop de supraveghere - cand count si jobs_in_progress sunt 0
+    while(1){
+	sem_wait(&ipc->job_queue.mutex);
+	if(ipc->job_queue.count == 0 && ipc->job_queue.jobs_in_progress == 0){
+		sem_post(&ipc->job_queue.mutex);
+		break;
+	}
+	sem_post(&ipc->job_queue.mutex);
+	usleep(1000); // managereul verifica periodic starea-  fara pauza ar face milioane de verificari pe secunda degeaba
+    }
+	
+    //trezirea workerilor blocati la sem_wait(slots_ocupate)
+    printf("[Manager] Toate joburile au fost procesate. Se trimite semnal de terminare workerilor\n");
+    for(int i = 0; i < num_workers; i++){
+	sem_post(&ipc->job_queue.slots_ocupate);	
+    }	
+
 
     // 4. Asteptarea incheierii (waitpid implicit global)
     for (int i = 0; i < num_workers; i++) {
@@ -86,6 +167,18 @@ int main(int argc, char *argv[]) {
         } else {
             printf("[Manager] Worker (PID: %d) s-a incheiat anormal.\n", child_pid);
         }
+    }
+
+    //distrugere semafoare
+    sem_destroy(&ipc->header_mutex);
+    sem_destroy(&ipc->job_queue.mutex);
+    sem_destroy(&ipc->job_queue.slots_libere);
+    sem_destroy(&ipc->job_queue.slots_ocupate);
+
+    for(uint32_t i = 0; i < num_workers; i++){
+	    sem_destroy(&ipc->result_channels[i].mutex);
+	    sem_destroy(&ipc->result_channels[i].slots_libere);
+	    sem_destroy(&ipc->result_channels[i].slots_ocupate);
     }
 
     // 5. Curatarea zonei mapate
