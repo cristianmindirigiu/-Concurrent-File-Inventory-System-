@@ -1,0 +1,16 @@
+# Build artifacts
+bin/
+tmp/
+*.o
+
+# Date runtime
+data/*.db
+data/*.mmap
+
+# Loguri 
+logs/*.log
+
+# Editor backups
+*.swp
+*~
+*.backup
