@@ -7,19 +7,23 @@
 #include <sys/wait.h>
 #include <fcntl.h>
 #include "../include/ipc_format.h"
+#include <limits.h>
 
 int main(int argc, char *argv[]) {
     char *root_dir = NULL;
     int num_workers = 0;
     char *ipc_path = "data/ipc.mmap";
     char *db_path = "data/inventory.db";
-    
+    int max_depth = -1; //nespecificat - valoarea negativa = lipsa argument
     // 1. Parsarea argumentelor CLI
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--root") == 0 && i + 1 < argc) root_dir = argv[++i];
         else if (strcmp(argv[i], "--workers") == 0 && i + 1 < argc) num_workers = atoi(argv[++i]);
         else if (strcmp(argv[i], "--ipc") == 0 && i + 1 < argc) ipc_path = argv[++i];
         else if (strcmp(argv[i], "--db") == 0 && i + 1 < argc) db_path = argv[++i];
+	else if (strcmp(argv[i], "--max-depth") == 0 && i+1 < argc){
+		max_depth = atoi(argv[++i]);
+	}
     }
     
     // Verificam argumentele minime in modul de inventariere
@@ -117,6 +121,10 @@ int main(int argc, char *argv[]) {
     sem_post(&ipc->job_queue.mutex); //elibereaza exclusivitatea
     sem_post(&ipc->job_queue.slots_ocupate); //anunta ca exista un job de luat
 
+
+    //pregateste argumentele pt workeri
+    char depth_str[16];
+    snprintf(depth_str, sizeof(depth_str), "%d", max_depth == -1 ? INT_MAX : max_depth);
     // 3. Crearea si lansarea workerilor prin fork() + execl()
     for (int i = 0; i < num_workers; i++) {
         pid_t pid = fork();
@@ -130,7 +138,8 @@ int main(int argc, char *argv[]) {
             // Copilul apeleaza exec pentru a deveni worker
             execl("./bin/fileops_worker", "fileops_worker", 
                   "--worker-id", id_str, 
-                  "--ipc", ipc_path, 
+                  "--ipc", ipc_path,
+		  "--max-depth", depth_str,
                   NULL);
             
             // Executa doar daca execl a esuat
