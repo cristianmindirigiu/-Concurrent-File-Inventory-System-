@@ -13,11 +13,10 @@
 #define RESULT_CHANNEL_CAPACITY 64  //cate records in canalul fiecarui worker
 #define SHA256_HEX_LEN 65  //64 hex chars + '\0'
 
+#define INV4_MAGIC "INV4"
+#define INV4_VERSION 1
 
-/* * Aceasta este structura memoriei partajate pentru Commit 1.
- * În Commit-ul 2 o vom extinde masiv prin adăugarea Job Queue-ului, 
- * Canalelor de Rezultate și a Semafoarelor de sincronizare.
- */
+
 typedef struct{ 
     char path[MAX_PATH_LEN]; //calea absoluta
     uint64_t size; //marime in bytes
@@ -107,4 +106,28 @@ typedef struct {
 
 } ipc_shared_t;
 
+
+
+//structuri pentru db
+//header-ul db-ului final
+typedef struct{
+	char magic[4]; //INV4
+	uint32_t format_version; //1
+	uint8_t complete; //0 - in progres, 1- e gata
+	uint64_t file_record_count; // nr fisiere
+	uint32_t worker_count; // nr workeri
+} inv4_header_t;
+
+//statistici per worker in db
+typedef struct{
+	uint32_t worker_id;
+	int32_t pid;
+	int32_t exit_status;
+	uint64_t jobs_processed;
+	uint64_t files_emitted;
+	uint64_t bytes_sum;
+	uint64_t time_ms;
+	uint64_t user_cpu_t;
+	uint64_t sys_cpu_t;
+} inv4_worker_stat_t;
 #endif

@@ -106,11 +106,11 @@ int main(int argc, char *argv[]) {
     }
 
     if (worker_id == -1 || !ipc_path) {
-        fprintf(stderr, "[Worker] Eroare: Argumente de lansare lipsa.\\n");
+        fprintf(stderr, "[Worker] Eroare: Argumente de lansare lipsa.\n");
         return 1;
     }
 
-    printf("[Worker %d] Lansat in executie. Atasare la canalul %s...\\n", worker_id, ipc_path);
+    printf("[Worker %d] Lansat in executie. Atasare la canalul %s...\n", worker_id, ipc_path);
 
     // 2. Maparea la aceeasi zona IPC partajata
     int fd = open(ipc_path, O_RDWR);
@@ -128,9 +128,9 @@ int main(int argc, char *argv[]) {
 
     // 3. Verificarea legaturii
     if (strncmp(ipc->magic, "IPC4", 4) == 0) {
-        printf("[Worker %d] Conectat. Magic number IPC4 confirmat.\\n", worker_id);
+        printf("[Worker %d] Conectat. Magic number IPC4 confirmat.\n", worker_id);
     } else {
-        printf("[Worker %d] Eroare la citirea structurii comune!\\n", worker_id);
+        printf("[Worker %d] Eroare la citirea structurii comune!\n", worker_id);
     }
     
     job_t my_job;
@@ -180,6 +180,6 @@ int main(int argc, char *argv[]) {
         perror("[Worker] Eroare munmap la iesire");
     }
     
-    printf("[Worker %d] Ciclu de viata incheiat. Gata pentru exit.\\n", worker_id);
+    printf("[Worker %d] Ciclu de viata incheiat. Gata pentru exit.\n", worker_id);
     return 0;
 }

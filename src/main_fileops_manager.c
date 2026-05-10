@@ -15,6 +15,8 @@ int main(int argc, char *argv[]) {
     char *ipc_path = "data/ipc.mmap";
     char *db_path = "data/inventory.db";
     int max_depth = -1; //nespecificat - valoarea negativa = lipsa argument
+    bool do_verify = false;
+    bool do_dump = false;
     
     // 1. Parsarea argumentelor CLI
     for (int i = 1; i < argc; i++) {
@@ -25,8 +27,88 @@ int main(int argc, char *argv[]) {
         else if (strcmp(argv[i], "--max-depth") == 0 && i+1 < argc){
             max_depth = atoi(argv[++i]);
         }
+	else if (strcmp(argv[i], "--verify") == 0) do_verify = true;
+	else if (strcmp(argv[i], "--dump") == 0) do_dump = true;
     }
     
+    //VERIFY - verific magic, versiunea, complete si dimensiunea fisierului
+    if(do_verify){
+	FILE* f = fopen(db_path, "rb");
+	if(f == NULL){
+		fprintf(stderr, "[Verify] Eroare, nu se poate deschide %s\n", db_path);
+		return 1;
+	}
+
+	inv4_header_t h;
+	if(fread(&h, sizeof(inv4_header_t), 1, f) != 1){
+		fprintf(stderr, "[Verify] Eroare, fisier prea mic\n");
+		fclose(f);
+		return 1;
+	}
+
+	//verif magic
+	if(memcmp(h.magic, INV4_MAGIC, 4)!=0){
+		fprintf(stderr, "[Verify] Eroare, magic invalid (asteptat INV4)\n");
+		fclose(f);
+		return 1;
+	}
+	//verif format version
+	if(h.format_version != INV4_VERSION){
+		fprintf(stderr, "[Verify] Eroare, versiune necunoscuta (%u)\n", h.format_version);
+		fclose(f);
+		return 1;
+	}
+	//verif complete
+	if(h.complete!=1){
+		fprintf(stderr, "[Verify] Eroare, DB incomplet\n");
+		fclose(f);
+		return 1;
+	}
+
+	//verif dimensiune fisier
+	fseek(f, 0, SEEK_END);
+	long file_size = ftell(f);
+	long expected_size = sizeof(inv4_header_t) + h.file_record_count * sizeof(file_record_t) + h.worker_count * sizeof(inv4_worker_stat_t);
+
+	if(file_size != expected_size){
+		fprintf(stderr, "[Verify] Eroare, dimensiunea incorecta (actual = %ld, asteptat = %ld)\n", file_size, expected_size);
+		fclose(f);
+		return 1;
+	}
+
+	fclose(f);
+	printf("[Verify] OK, %s este valid (%lu records , %u workeri)\n", db_path, h.file_record_count, h.worker_count);
+	return 0;
+    }
+
+    
+    //DUMP - citesc headerul si afisez campurile intr un format fix
+    if(do_dump){
+	FILE* f = fopen(db_path, "rb");
+	if(f == NULL){
+		fprintf(stderr, "[Dump] Eroare, nu se poate deschide %s\n", db_path);
+		return 1;
+	}
+
+	inv4_header_t h;
+	if(fread(&h, sizeof(inv4_header_t), 1, f) != 1){
+		fprintf(stderr, "[Dump] Eroare : fisier prea mic\n");
+		fclose(f);
+		return 1;
+	}
+	fclose(f);
+
+	//output
+	printf("magic=%.4s\n", h.magic);
+	printf("version=%u\n", h.format_version);
+	printf("complete=%u\n", h.complete);
+	printf("file_record_count=%lu\n", h.file_record_count);
+	printf("worker_count=%u\n", h.worker_count);
+
+	return 0;
+    }
+
+
     // Verificam argumentele minime in modul de inventariere
     if (!root_dir || num_workers < 1) {
         fprintf(stderr, "[Manager] Utilizare: %s --root <dir> --workers <N>\n", argv[0]);
@@ -143,6 +225,15 @@ int main(int argc, char *argv[]) {
     int workeri_activi = num_workers;
     bool joburi_gata = false;
     uint64_t fisiere_gasite = 0;
+	
+    //array pt colectarea records (max 100000 fisiere)
+    uint64_t max_records = 100000;
+    file_record_t* all_records = malloc(max_records * sizeof(file_record_t));
+    if(all_records == NULL){
+	    perror("[Manager] Eroare alocare memorie pt records");
+	    return 1;
+    }
+    uint64_t total_records = 0;
 
     printf("[Manager] Incep monitorizarea canalelor IPC...\n");
 
@@ -187,6 +278,11 @@ int main(int argc, char *argv[]) {
                 // Deocamdata (Commit 3) doar printam ce a tras din conducta
                 fisiere_gasite++;
                 printf("[Manager] Extras: %s | Size: %lu (din Worker %d)\n", rec.path, rec.size, i);
+
+		//salveaza record-ul in array
+		if (total_records < max_records){
+			all_records[total_records++] = rec;
+		}
             }
         }
         
@@ -197,6 +293,68 @@ int main(int argc, char *argv[]) {
     }
 
     printf("[Manager] Toate canalele au fost epuizate si inchise. Total fisiere receptionate: %lu\n", fisiere_gasite);
+    
+
+    //scrierea db-ului
+    //scriu intr-un fisier temporar si apoi fac rename
+    
+    //construirea caii fisierului temp
+    char tmp_path[512];
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", db_path);
+	
+    //deschiderea fisierului tmp pentru scriere binara
+    FILE* db_file = fopen(tmp_path, "wb");
+    if(db_file == NULL){
+	    perror("[Manager] Eroare la deschiderea fisierului temporar");
+	    free(all_records);
+	    return 1;
+    }
+
+    //construirea si scrierea header-ului
+    inv4_header_t header;
+    memcpy(header.magic, INV4_MAGIC, 4);
+    header.format_version = INV4_VERSION;
+    header.complete = 0;
+    header.file_record_count = total_records;
+    header.worker_count = num_workers;
+
+    fwrite(&header, sizeof(inv4_header_t), 1, db_file);
+
+    //scriu toate records
+    fwrite(all_records, sizeof(file_record_t), total_records, db_file);
+
+    //construiesc si scriu worker stats
+    for(int i = 0; i < num_workers; i++){
+	    inv4_worker_stat_t ws;
+	    ws.worker_id = ipc->worker_stats[i].worker_id;
+	    ws.pid = ipc->worker_stats[i].pid;
+	    ws.exit_status = ipc->worker_stats[i].exit_status;
+	    ws.jobs_processed = ipc->worker_stats[i].jobs_processed;
+	    ws.files_emitted = ipc->worker_stats[i].files_emitted;
+	    ws.bytes_sum = ipc->worker_stats[i].bytes_sum;
+	    ws.time_ms = ipc->worker_stats[i].time_ms;
+	    ws.user_cpu_t = ipc->worker_stats[i].user_cpu_t;
+	    ws.sys_cpu_t = ipc->worker_stats[i].sys_cpu_t;
+
+	    fwrite(&ws , sizeof(inv4_worker_stat_t), 1, db_file);
+     }
+     
+     //setez complete = 1 si resetez headerul
+     header.complete = 1;
+     rewind(db_file);
+     fwrite(&header, sizeof(inv4_header_t), 1, db_file);
+
+     //inchid fisierul si fac rename
+     fclose(db_file);
+
+     if(rename(tmp_path, db_path) == -1){
+	     perror("[Manager] Eroare rename DB");
+	     free(all_records);
+	     return 1;
+     }
+     printf("[Manager] DB scris cu succes: %s (%lu records)\n", db_path, total_records);
+
+
 
     // 4. Asteptarea incheierii (waitpid implicit global)
     for (int i = 0; i < num_workers; i++) {
@@ -225,6 +383,9 @@ int main(int argc, char *argv[]) {
     if (munmap(ipc, ipc_size) == -1) {
         perror("[Manager] Eroare munmap");
     }
+    //cleanup all_records
+    free(all_records);
+
     printf("[Manager] Toate procesele worker s-au terminat cu succes.\n");
     
     return 0;
