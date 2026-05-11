@@ -27,89 +27,99 @@ int main(int argc, char *argv[]) {
         else if (strcmp(argv[i], "--max-depth") == 0 && i+1 < argc){
             max_depth = atoi(argv[++i]);
         }
-	else if (strcmp(argv[i], "--verify") == 0) do_verify = true;
-	else if (strcmp(argv[i], "--dump") == 0) do_dump = true;
+        else if (strcmp(argv[i], "--verify") == 0) do_verify = true;
+        else if (strcmp(argv[i], "--dump") == 0) do_dump = true;
     }
     
-    //VERIFY - verific magic, versiunea, complete si dimensiunea fisierului
+    //VERIFY
     if(do_verify){
-	FILE* f = fopen(db_path, "rb");
-	if(f == NULL){
-		fprintf(stderr, "[Verify] Eroare, nu se poate deschide %s\n", db_path);
-		return 1;
-	}
+        FILE* f = fopen(db_path, "rb");
+        if(f == NULL){
+            fprintf(stderr, "[Verify] Eroare, nu se poate deschide %s\n", db_path);
+            return 1;
+        }
 
-	inv4_header_t h;
-	if(fread(&h, sizeof(inv4_header_t), 1, f) != 1){
-		fprintf(stderr, "[Verify] Eroare, fisier prea mic\n");
-		fclose(f);
-		return 1;
-	}
+        inv4_header_t h;
+        if(fread(&h, sizeof(inv4_header_t), 1, f) != 1){
+            fprintf(stderr, "[Verify] Eroare, fisier prea mic\n");
+            fclose(f);
+            return 1;
+        }
 
-	//verif magic
-	if(memcmp(h.magic, INV4_MAGIC, 4)!=0){
-		fprintf(stderr, "[Verify] Eroare, magic invalid (asteptat INV4)\n");
-		fclose(f);
-		return 1;
-	}
-	//verif format version
-	if(h.format_version != INV4_VERSION){
-		fprintf(stderr, "[Verify] Eroare, versiune necunoscuta (%u)\n", h.format_version);
-		fclose(f);
-		return 1;
-	}
-	//verif complete
-	if(h.complete!=1){
-		fprintf(stderr, "[Verify] Eroare, DB incomplet\n");
-		fclose(f);
-		return 1;
-	}
+        if(memcmp(h.magic, INV4_MAGIC, 4)!=0){
+            fprintf(stderr, "[Verify] Eroare, magic invalid (asteptat INV4)\n");
+            fclose(f);
+            return 1;
+        }
+        if(h.format_version != INV4_VERSION){
+            fprintf(stderr, "[Verify] Eroare, versiune necunoscuta (%u)\n", h.format_version);
+            fclose(f);
+            return 1;
+        }
+        if(h.complete!=1){
+            fprintf(stderr, "[Verify] Eroare, DB incomplet\n");
+            fclose(f);
+            return 1;
+        }
 
-	//verif dimensiune fisier
-	fseek(f, 0, SEEK_END);
-	long file_size = ftell(f);
-	long expected_size = sizeof(inv4_header_t) + h.file_record_count * sizeof(file_record_t) + h.worker_count * sizeof(inv4_worker_stat_t);
+        fseek(f, 0, SEEK_END);
+        long file_size = ftell(f);
+        long expected_size = sizeof(inv4_header_t) + h.file_record_count * sizeof(file_record_t) + h.worker_count * sizeof(inv4_worker_stat_t);
 
-	if(file_size != expected_size){
-		fprintf(stderr, "[Verify] Eroare, dimensiunea incorecta (actual = %ld, asteptat = %ld)\n", file_size, expected_size);
-		fclose(f);
-		return 1;
-	}
+        if(file_size != expected_size){
+            fprintf(stderr, "[Verify] Eroare, dimensiunea incorecta (actual = %ld, asteptat = %ld)\n", file_size, expected_size);
+            fclose(f);
+            return 1;
+        }
 
-	fclose(f);
-	printf("[Verify] OK, %s este valid (%lu records , %u workeri)\n", db_path, h.file_record_count, h.worker_count);
-	return 0;
+        fclose(f);
+        printf("[Verify] OK, %s este valid (%lu records , %u workeri)\n", db_path, h.file_record_count, h.worker_count);
+        return 0;
     }
 
-    
-    //DUMP - citesc headerul si afisez campurile intr un format fix
+    //DUMP
     if(do_dump){
-	FILE* f = fopen(db_path, "rb");
-	if(f == NULL){
-		fprintf(stderr, "[Dump] Eroare, nu se poate deschide %s\n", db_path);
-		return 1;
-	}
+        FILE* f = fopen(db_path, "rb");
+        if(f == NULL){
+            fprintf(stderr, "[Dump] Eroare, nu se poate deschide %s\n", db_path);
+            return 1;
+        }
 
-	inv4_header_t h;
-	if(fread(&h, sizeof(inv4_header_t), 1, f) != 1){
-		fprintf(stderr, "[Dump] Eroare : fisier prea mic\n");
-		fclose(f);
-		return 1;
-	}
-	fclose(f);
+        inv4_header_t h;
+        if(fread(&h, sizeof(inv4_header_t), 1, f) != 1){
+            fprintf(stderr, "[Dump] Eroare: fisier prea mic\n");
+            fclose(f);
+            return 1;
+        }
 
-	//output
-	printf("magic=%.4s\n", h.magic);
-	printf("version=%u\n", h.format_version);
-	printf("complete=%u\n", h.complete);
-	printf("file_record_count=%lu\n", h.file_record_count);
-	printf("worker_count=%u\n", h.worker_count);
+        printf("--- HEADER ---\n");
+        printf("magic=%.4s\n", h.magic);
+        printf("version=%u\n", h.format_version);
+        printf("complete=%u\n", h.complete);
+        printf("file_record_count=%lu\n", h.file_record_count);
+        printf("worker_count=%u\n", h.worker_count);
 
-	return 0;
+        printf("\n--- FILE RECORDS ---\n");
+        for(uint64_t i = 0; i < h.file_record_count; i++){
+            file_record_t rec;
+            if(fread(&rec, sizeof(file_record_t), 1, f) == 1){
+                printf("[%lu] %s | Size: %lu bytes | SHA256: %s\n", i, rec.path, rec.size, rec.sha256);
+            }
+        }
+
+        printf("\n--- WORKER STATS ---\n");
+        for(uint32_t i = 0; i < h.worker_count; i++){
+            inv4_worker_stat_t ws;
+            if(fread(&ws, sizeof(inv4_worker_stat_t), 1, f) == 1){
+                printf("Worker %u (PID: %d) | Exit Status: %d | Jobs: %u | Files Emitted: %u | Bytes: %lu | Wall Time: %lu ms | CPU User: %lu us | CPU Sys: %lu us\n",
+                       ws.worker_id, ws.pid, ws.exit_status, ws.jobs_processed, ws.files_emitted, ws.bytes_sum, ws.time_ms, ws.user_cpu_t, ws.sys_cpu_t);
+            }
+        }
+
+        fclose(f);
+        return 0;
     }
-
-
-    // Verificam argumentele minime in modul de inventariere
+    
     if (!root_dir || num_workers < 1) {
         fprintf(stderr, "[Manager] Utilizare: %s --root <dir> --workers <N>\n", argv[0]);
         return 1;
@@ -117,36 +127,25 @@ int main(int argc, char *argv[]) {
 
     printf("[Manager] Incepem inventarierea pe '%s' cu %d workeri.\n", root_dir, num_workers);
 
-    // 2. Initializarea memoriei partajate IPC (mmap)
+    // --- MODIFICARE T4: Asigurăm crearea folderelor folosite ---
+    system("mkdir -p data reports");
+
     int fd = open(ipc_path, O_RDWR | O_CREAT | O_TRUNC, 0666);
-    if (fd == -1) { 
-        perror("[Manager] Eroare creare fisier IPC"); 
-        return 1; 
-    }
+    if (fd == -1) { perror("[Manager] Eroare creare fisier IPC"); return 1; }
     
     size_t ipc_size = sizeof(ipc_shared_t);
-    if (ftruncate(fd, ipc_size) == -1) { 
-        perror("[Manager] Eroare ftruncate IPC"); 
-        close(fd); return 1; 
-    }
+    if (ftruncate(fd, ipc_size) == -1) { perror("[Manager] Eroare ftruncate IPC"); close(fd); return 1; }
     
     ipc_shared_t *ipc = mmap(NULL, ipc_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    if (ipc == MAP_FAILED) { 
-        perror("[Manager] Eroare mmap"); 
-        close(fd); return 1; 
-    }
-    close(fd); // Dupa mapare, nu mai avem nevoie de descriptor deschis
+    if (ipc == MAP_FAILED) { perror("[Manager] Eroare mmap"); close(fd); return 1; }
+    close(fd); 
 
-    // Initializam zonele de baza
     memcpy(ipc->magic, "IPC4", 4);
     ipc->num_workers = num_workers;
     ipc->terminate_flag = false;
     ipc->version = IPC_VERSION;
 
-    //INITIALIZARE SEMAFOARE
     sem_init(&ipc->header_mutex, 1, 1);
-
-    //job queue
     ipc->job_queue.head = 0;
     ipc->job_queue.tail = 0;
     ipc->job_queue.count = 0;
@@ -156,7 +155,6 @@ int main(int argc, char *argv[]) {
     sem_init(&ipc->job_queue.slots_libere, 1 , JOB_QUEUE_CAPACITY);
     sem_init(&ipc->job_queue.slots_ocupate, 1, 0);
 
-    // result channels (1 pt fiecare worker)
     for(uint32_t i = 0; i < num_workers; i++){
         ipc->result_channels[i].head = 0;
         ipc->result_channels[i].tail = 0;
@@ -168,7 +166,6 @@ int main(int argc, char *argv[]) {
         sem_init(&ipc->result_channels[i].slots_ocupate, 1 , 0);    
     }
 
-    //worker stats
     for(uint32_t i = 0; i < num_workers; i++){
         ipc->worker_stats[i].worker_id = i;
         ipc->worker_stats[i].pid = 0;
@@ -183,10 +180,8 @@ int main(int argc, char *argv[]) {
     }
     printf("[Manager] Semafoare si structuri initializate\n");
     
-    //adaugare job in job_queue
     printf("[Manager] Adaug jobul in coada: %s\n", root_dir);
-
-    sem_wait(&ipc->job_queue.slots_libere); //astept un loc liber
+    sem_wait(&ipc->job_queue.slots_libere); 
     sem_wait(&ipc->job_queue.mutex);
     strncpy(ipc->job_queue.buffer[ipc->job_queue.tail].path, root_dir, MAX_PATH_LEN - 1); 
     ipc->job_queue.buffer[ipc->job_queue.tail].path[MAX_PATH_LEN - 1] = '\0';  
@@ -196,11 +191,9 @@ int main(int argc, char *argv[]) {
     sem_post(&ipc->job_queue.mutex); 
     sem_post(&ipc->job_queue.slots_ocupate); 
 
-    //pregateste argumentele pt workeri
     char depth_str[16];
     snprintf(depth_str, sizeof(depth_str), "%d", max_depth == -1 ? INT_MAX : max_depth);
     
-    // 3. Crearea si lansarea workerilor prin fork() + execl()
     for (int i = 0; i < num_workers; i++) {
         pid_t pid = fork();
         if (pid < 0) {
@@ -209,44 +202,38 @@ int main(int argc, char *argv[]) {
         } else if (pid == 0) {
             char id_str[16];
             snprintf(id_str, sizeof(id_str), "%d", i);
-            
-            execl("./bin/fileops_worker", "fileops_worker", 
-                  "--worker-id", id_str, 
-                  "--ipc", ipc_path,
-                  "--max-depth", depth_str,
-                  NULL);
-            
+            execl("./bin/fileops_worker", "fileops_worker", "--worker-id", id_str, "--ipc", ipc_path, "--max-depth", depth_str, NULL);
             perror("[Manager-Fiu] Eroare execl");
             exit(1);
         }
     }
     
-    // ---> BUCLE HIBRIDA DE SUPRAVEGHERE SI CONSUM (Commit 3) <---
     int workeri_activi = num_workers;
     bool joburi_gata = false;
     uint64_t fisiere_gasite = 0;
-	
-    //array pt colectarea records (max 100000 fisiere)
+    
     uint64_t max_records = 100000;
     file_record_t* all_records = malloc(max_records * sizeof(file_record_t));
     if(all_records == NULL){
-	    perror("[Manager] Eroare alocare memorie pt records");
-	    return 1;
+        perror("[Manager] Eroare alocare memorie pt records");
+        return 1;
     }
     uint64_t total_records = 0;
 
     printf("[Manager] Incep monitorizarea canalelor IPC...\n");
 
     while (workeri_activi > 0) {
-        bool idle = true; // Presupunem ca nu avem ce face tura asta
+        bool idle = true; 
 
-        // 1. Verificam daca e timpul sa trimitem semnalul de terminare a cautarii
         if (!joburi_gata) {
             sem_wait(&ipc->job_queue.mutex);
             if (ipc->job_queue.count == 0 && ipc->job_queue.jobs_in_progress == 0) {
                 joburi_gata = true;
+                
+                // --- MODIFICARE T4: Semnalizare corectă workerilor ---
+                ipc->terminate_flag = true; 
+
                 printf("[Manager] Scanarea e gata. Se trimite semnal de terminare workerilor.\n");
-                // Trezim toti workerii care asteapta joburi (ca sa poata da break si inchide)
                 for(int j = 0; j < num_workers; j++) {
                     sem_post(&ipc->job_queue.slots_ocupate);
                 }
@@ -254,20 +241,17 @@ int main(int argc, char *argv[]) {
             sem_post(&ipc->job_queue.mutex);
         }
 
-        // 2. Colectam non-blocking rezultatele trimise de workeri
         for (int i = 0; i < num_workers; i++) {
             if (sem_trywait(&ipc->result_channels[i].slots_ocupate) == 0) {
                 idle = false;
                 sem_wait(&ipc->result_channels[i].mutex);
                 
-                // Daca semaforul s-a activat doar pentru a ne spune ca s-a inchis canalul
                 if (ipc->result_channels[i].count == 0 && ipc->result_channels[i].closed) {
                     sem_post(&ipc->result_channels[i].mutex);
-                    workeri_activi--; // Am marcat acest worker ca "incheiat"
+                    workeri_activi--; 
                     continue; 
                 }
 
-                // Extragem rezultatul
                 file_record_t rec = ipc->result_channels[i].buffer[ipc->result_channels[i].head];
                 ipc->result_channels[i].head = (ipc->result_channels[i].head + 1) % RESULT_CHANNEL_CAPACITY;
                 ipc->result_channels[i].count--;
@@ -275,42 +259,47 @@ int main(int argc, char *argv[]) {
                 sem_post(&ipc->result_channels[i].mutex);
                 sem_post(&ipc->result_channels[i].slots_libere);
 
-                // Deocamdata (Commit 3) doar printam ce a tras din conducta
                 fisiere_gasite++;
-                printf("[Manager] Extras: %s | Size: %lu (din Worker %d)\n", rec.path, rec.size, i);
-
-		//salveaza record-ul in array
-		if (total_records < max_records){
-			all_records[total_records++] = rec;
-		}
+                if (total_records < max_records){
+                    all_records[total_records++] = rec;
+                }
             }
         }
         
-        // Daca niciun canal nu avea date si joburile inca nu sunt gata, dormim putin
-        if (idle) {
-            usleep(1000); 
-        }
+        if (idle) usleep(1000); 
     }
 
     printf("[Manager] Toate canalele au fost epuizate si inchise. Total fisiere receptionate: %lu\n", fisiere_gasite);
-    
 
-    //scrierea db-ului
-    //scriu intr-un fisier temporar si apoi fac rename
-    
-    //construirea caii fisierului temp
-    char tmp_path[512];
-    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", db_path);
-	
-    //deschiderea fisierului tmp pentru scriere binara
-    FILE* db_file = fopen(tmp_path, "wb");
-    if(db_file == NULL){
-	    perror("[Manager] Eroare la deschiderea fisierului temporar");
-	    free(all_records);
-	    return 1;
+    printf("[Manager] Colectam statusurile finale ale proceselor...\n");
+    for (int i = 0; i < num_workers; i++) {
+        int status;
+        pid_t child_pid = wait(&status);
+        
+        for(int j = 0; j < num_workers; j++) {
+            if (ipc->worker_stats[j].pid == child_pid) {
+                if (WIFEXITED(status)) {
+                    ipc->worker_stats[j].exit_status = WEXITSTATUS(status);
+                    printf("[Manager] Worker (PID: %d, ID: %d) s-a incheiat normal cu exit code %d.\n", child_pid, j, WEXITSTATUS(status));
+                } else {
+                    ipc->worker_stats[j].exit_status = -1;
+                    printf("[Manager] Worker (PID: %d, ID: %d) s-a incheiat anormal.\n", child_pid, j);
+                }
+                ipc->worker_stats[j].active = false;
+                break;
+            }
+        }
     }
 
-    //construirea si scrierea header-ului
+    char tmp_path[512];
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", db_path);
+    FILE* db_file = fopen(tmp_path, "wb");
+    if(db_file == NULL){
+        perror("[Manager] Eroare la deschiderea fisierului temporar");
+        free(all_records);
+        return 1;
+    }
+
     inv4_header_t header;
     memcpy(header.magic, INV4_MAGIC, 4);
     header.format_version = INV4_VERSION;
@@ -319,55 +308,35 @@ int main(int argc, char *argv[]) {
     header.worker_count = num_workers;
 
     fwrite(&header, sizeof(inv4_header_t), 1, db_file);
-
-    //scriu toate records
     fwrite(all_records, sizeof(file_record_t), total_records, db_file);
 
-    //construiesc si scriu worker stats
     for(int i = 0; i < num_workers; i++){
-	    inv4_worker_stat_t ws;
-	    ws.worker_id = ipc->worker_stats[i].worker_id;
-	    ws.pid = ipc->worker_stats[i].pid;
-	    ws.exit_status = ipc->worker_stats[i].exit_status;
-	    ws.jobs_processed = ipc->worker_stats[i].jobs_processed;
-	    ws.files_emitted = ipc->worker_stats[i].files_emitted;
-	    ws.bytes_sum = ipc->worker_stats[i].bytes_sum;
-	    ws.time_ms = ipc->worker_stats[i].time_ms;
-	    ws.user_cpu_t = ipc->worker_stats[i].user_cpu_t;
-	    ws.sys_cpu_t = ipc->worker_stats[i].sys_cpu_t;
+        inv4_worker_stat_t ws;
+        ws.worker_id = ipc->worker_stats[i].worker_id;
+        ws.pid = ipc->worker_stats[i].pid;
+        ws.exit_status = ipc->worker_stats[i].exit_status;
+        ws.jobs_processed = ipc->worker_stats[i].jobs_processed;
+        ws.files_emitted = ipc->worker_stats[i].files_emitted;
+        ws.bytes_sum = ipc->worker_stats[i].bytes_sum;
+        ws.time_ms = ipc->worker_stats[i].time_ms;
+        ws.user_cpu_t = ipc->worker_stats[i].user_cpu_t;
+        ws.sys_cpu_t = ipc->worker_stats[i].sys_cpu_t;
 
-	    fwrite(&ws , sizeof(inv4_worker_stat_t), 1, db_file);
-     }
-     
-     //setez complete = 1 si resetez headerul
-     header.complete = 1;
-     rewind(db_file);
-     fwrite(&header, sizeof(inv4_header_t), 1, db_file);
-
-     //inchid fisierul si fac rename
-     fclose(db_file);
-
-     if(rename(tmp_path, db_path) == -1){
-	     perror("[Manager] Eroare rename DB");
-	     free(all_records);
-	     return 1;
-     }
-     printf("[Manager] DB scris cu succes: %s (%lu records)\n", db_path, total_records);
-
-
-
-    // 4. Asteptarea incheierii (waitpid implicit global)
-    for (int i = 0; i < num_workers; i++) {
-        int status;
-        pid_t child_pid = wait(&status);
-        if (WIFEXITED(status)) {
-            printf("[Manager] Worker (PID: %d) s-a incheiat normal cu exit code %d.\n", child_pid, WEXITSTATUS(status));
-        } else {
-            printf("[Manager] Worker (PID: %d) s-a incheiat anormal.\n", child_pid);
-        }
+        fwrite(&ws , sizeof(inv4_worker_stat_t), 1, db_file);
     }
+    
+    header.complete = 1;
+    rewind(db_file);
+    fwrite(&header, sizeof(inv4_header_t), 1, db_file);
 
-    //distrugere semafoare
+    fclose(db_file);
+    if(rename(tmp_path, db_path) == -1){
+        perror("[Manager] Eroare rename DB");
+        free(all_records);
+        return 1;
+    }
+    printf("[Manager] DB scris cu succes: %s (%lu records)\n", db_path, total_records);
+
     sem_destroy(&ipc->header_mutex);
     sem_destroy(&ipc->job_queue.mutex);
     sem_destroy(&ipc->job_queue.slots_libere);
@@ -379,14 +348,11 @@ int main(int argc, char *argv[]) {
         sem_destroy(&ipc->result_channels[i].slots_ocupate);
     }
 
-    // 5. Curatarea zonei mapate
     if (munmap(ipc, ipc_size) == -1) {
         perror("[Manager] Eroare munmap");
     }
-    //cleanup all_records
     free(all_records);
 
-    printf("[Manager] Toate procesele worker s-au terminat cu succes.\n");
-    
+    printf("[Manager] Toate procesele worker s-au terminat cu succes. Proiect finalizat!\n");
     return 0;
 }
