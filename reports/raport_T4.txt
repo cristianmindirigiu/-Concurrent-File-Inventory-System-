@@ -1,0 +1,16 @@
+--- HEADER ---
+magic=INV4
+version=1
+complete=1
+file_record_count=4
+worker_count=2
+
+--- FILE RECORDS ---
+[0] tmp/test_t4_scenario/file1.txt | Size: 17 bytes | SHA256: 2de7b5fe8acad10bb2c75810ae0a20ab5a9eab5b405cfcbac60f3303d3a49182
+[1] tmp/test_t4_scenario/dir1/file2.txt | Size: 33 bytes | SHA256: 9f86367f8cd77b3e45870e78d72dae00eb3f45514a4c5442e66ae03d588ad382
+[2] tmp/test_t4_scenario/dir3/file3.txt | Size: 23 bytes | SHA256: 4397fd29f17aab09beaeb5fa78712baaa7cd45ffb3e028552c786da3da2b8ee3
+[3] tmp/test_t4_scenario/dir1/dir2/empty.log | Size: 0 bytes | SHA256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+--- WORKER STATS ---
+Worker 0 (PID: 5389) | Exit Status: 0 | Jobs: 2 | Files Emitted: 2 | Bytes: 33 | Wall Time: 6 ms | CPU User: 978 us | CPU Sys: 0 us
+Worker 1 (PID: 5390) | Exit Status: 0 | Jobs: 2 | Files Emitted: 2 | Bytes: 40 | Wall Time: 6 ms | CPU User: 0 us | CPU Sys: 950 us
