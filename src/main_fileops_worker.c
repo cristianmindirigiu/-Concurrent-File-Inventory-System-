@@ -7,17 +7,18 @@
 #include "../include/ipc_format.h"
 #include <dirent.h>
 #include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/resource.h>
 
 void compute_sha256(const char *path, char *output_buffer) {
     char cmd[MAX_PATH_LEN + 32];
-    // Folosim utilitarul de sistem sha256sum pentru simplitate și siguranță în C
     snprintf(cmd, sizeof(cmd), "sha256sum \"%s\" 2>/dev/null", path);
     FILE *fp = popen(cmd, "r");
     if (fp) {
         if (fgets(output_buffer, 65, fp) == NULL) {
             strcpy(output_buffer, "N/A");
         } else {
-            output_buffer[64] = '\0'; // Asiguram terminatorul de sir corect
+            output_buffer[64] = '\0'; 
         }
         pclose(fp);
     } else {
@@ -26,26 +27,24 @@ void compute_sha256(const char *path, char *output_buffer) {
 }
 
 void scaneaza_director(ipc_shared_t* ipc, job_t job, uint32_t max_depth, int worker_id){
-    DIR* dir = opendir(job.path); //deschidere directoriu
+    DIR* dir = opendir(job.path); 
     if(dir == NULL){
         perror("Eroare deschidere director");
         return;
     }
     struct dirent* entry;
     while((entry = readdir(dir)) != NULL){
-        //entry->d_name - numele intrarii
         if(strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0){
             continue;
         }
-        //construire cale completa
+        
         char full_path[MAX_PATH_LEN * 2];
         snprintf(full_path, sizeof(full_path), "%s/%s", job.path, entry->d_name);
         
-        //aflarea tipului cu lstat
         struct stat st;
-        if(lstat(full_path, &st) == -1) continue; //procesul poate fi disparut
+        if(lstat(full_path, &st) == -1) continue; 
         
-        if(S_ISLNK(st.st_mode)) continue; //e symlink
+        if(S_ISLNK(st.st_mode)) continue; 
         if(S_ISDIR(st.st_mode)){
             if(job.depth < max_depth){
                 job_t nou_job;
@@ -53,7 +52,6 @@ void scaneaza_director(ipc_shared_t* ipc, job_t job, uint32_t max_depth, int wor
                 nou_job.path[MAX_PATH_LEN - 1] = '\0';
                 nou_job.depth = job.depth + 1;
 
-                //adaugare in coada
                 sem_wait(&ipc->job_queue.slots_libere);
                 sem_wait(&ipc->job_queue.mutex);
                 ipc->job_queue.buffer[ipc->job_queue.tail] = nou_job;
@@ -73,10 +71,12 @@ void scaneaza_director(ipc_shared_t* ipc, job_t job, uint32_t max_depth, int wor
             rec.uid = st.st_uid;
             rec.gid = st.st_gid;
             
-            // Calculam hash-ul efectiv folosind noua functie
             compute_sha256(full_path, rec.sha256);
 
-            // Punem rezultatul in canalul de rezultate propriu al worker-ului
+            // ACTUALIZARE STATISTICI IN TIMP REAL
+            ipc->worker_stats[worker_id].files_emitted++;
+            ipc->worker_stats[worker_id].bytes_sum += st.st_size;
+
             sem_wait(&ipc->result_channels[worker_id].slots_libere);
             sem_wait(&ipc->result_channels[worker_id].mutex);
 
@@ -92,11 +92,14 @@ void scaneaza_director(ipc_shared_t* ipc, job_t job, uint32_t max_depth, int wor
 }
 
 int main(int argc, char *argv[]) {
+    // START CRONOMETRU
+    struct timeval start_time, end_time;
+    gettimeofday(&start_time, NULL);
+
     int worker_id = -1;
     char *ipc_path = NULL;
-    uint32_t max_depth = UINT32_MAX; //e practic infinit si nu va opri recursivitatea
+    uint32_t max_depth = UINT32_MAX; 
     
-    // 1. Parsarea argumentelor venite din exec()
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--worker-id") == 0 && i + 1 < argc) worker_id = atoi(argv[++i]);
         else if (strcmp(argv[i], "--ipc") == 0 && i + 1 < argc) ipc_path = argv[++i];
@@ -110,9 +113,6 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    printf("[Worker %d] Lansat in executie. Atasare la canalul %s...\n", worker_id, ipc_path);
-
-    // 2. Maparea la aceeasi zona IPC partajata
     int fd = open(ipc_path, O_RDWR);
     if (fd == -1) { 
         perror("[Worker] Eroare deschidere IPC"); 
@@ -126,18 +126,20 @@ int main(int argc, char *argv[]) {
     }
     close(fd);
 
-    // 3. Verificarea legaturii
+    // SETARE PID IN STRUCTURA STATISTICA
+    ipc->worker_stats[worker_id].pid = getpid();
+    printf("[Worker %d] Lansat in executie cu PID %d. Atasare la canal...\n", worker_id, getpid());
+
     if (strncmp(ipc->magic, "IPC4", 4) == 0) {
         printf("[Worker %d] Conectat. Magic number IPC4 confirmat.\n", worker_id);
-    } else {
-        printf("[Worker %d] Eroare la citirea structurii comune!\n", worker_id);
     }
     
     job_t my_job;
     while(1){
-        // verificare conditie de terminare (nu mai este sursa de joburi noi)
         sem_wait(&ipc->job_queue.mutex);
-        if(ipc->job_queue.count == 0 && ipc->job_queue.jobs_in_progress == 0){
+        
+        // --- MODIFICARE T4: Dacă Managerul a cerut oprirea ---
+        if(ipc->terminate_flag){ 
             sem_post(&ipc->job_queue.mutex);
             break;
         }
@@ -145,10 +147,10 @@ int main(int argc, char *argv[]) {
 
         sem_wait(&ipc->job_queue.slots_ocupate);
 
-        // verificare pt semnal fals de la manager (dupa sem_post)
-        // previne workerul din a citi din coada goala
         sem_wait(&ipc->job_queue.mutex);
-        if(ipc->job_queue.count == 0){
+        
+        // --- MODIFICARE T4: Se verifică terminate_flag inclusiv după trezire ---
+        if(ipc->terminate_flag || ipc->job_queue.count == 0){ 
             sem_post(&ipc->job_queue.mutex);
             break;
         }
@@ -160,22 +162,30 @@ int main(int argc, char *argv[]) {
         sem_post(&ipc->job_queue.mutex);
         sem_post(&ipc->job_queue.slots_libere);
         
+        // MARCHEAZA JOB PRELUAT
+        ipc->worker_stats[worker_id].jobs_processed++;
+        
         scaneaza_director(ipc, my_job, max_depth, worker_id);
         
-        //marchez ca am terminat acest job
         sem_wait(&ipc->job_queue.mutex);
         ipc->job_queue.jobs_in_progress--;
         sem_post(&ipc->job_queue.mutex);
     }
     
-    // --- SEMNALIZARE INCHIDERE CANAL ---
+    // FINALIZARE STATISTICI: TIMPI CPU SI WALL TIME
+    struct rusage usage;
+    getrusage(RUSAGE_SELF, &usage);
+    ipc->worker_stats[worker_id].user_cpu_t = usage.ru_utime.tv_sec * 1000000 + usage.ru_utime.tv_usec;
+    ipc->worker_stats[worker_id].sys_cpu_t = usage.ru_stime.tv_sec * 1000000 + usage.ru_stime.tv_usec;
+
+    gettimeofday(&end_time, NULL);
+    ipc->worker_stats[worker_id].time_ms = (end_time.tv_sec - start_time.tv_sec) * 1000 + (end_time.tv_usec - start_time.tv_usec) / 1000;
+
     sem_wait(&ipc->result_channels[worker_id].mutex);
     ipc->result_channels[worker_id].closed = true;
     sem_post(&ipc->result_channels[worker_id].mutex);
-    // Trezim managerul o ultima data ca sa ii spunem ca am terminat
     sem_post(&ipc->result_channels[worker_id].slots_ocupate);
 
-    // 4. Eliberarea resurselor locale inainte de exit
     if (munmap(ipc, sizeof(ipc_shared_t)) == -1) {
         perror("[Worker] Eroare munmap la iesire");
     }
