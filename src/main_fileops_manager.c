@@ -18,7 +18,7 @@ int main(int argc, char *argv[]) {
     bool do_verify = false;
     bool do_dump = false;
     
-    // 1. Parsarea argumentelor CLI
+    // parsarea argumentelor CLI
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--root") == 0 && i + 1 < argc) root_dir = argv[++i];
         else if (strcmp(argv[i], "--workers") == 0 && i + 1 < argc) num_workers = atoi(argv[++i]);
@@ -127,7 +127,7 @@ int main(int argc, char *argv[]) {
 
     printf("[Manager] Incepem inventarierea pe '%s' cu %d workeri.\n", root_dir, num_workers);
 
-    // --- MODIFICARE T4: Asigurăm crearea folderelor folosite ---
+    // crearea folderelor folosite
     system("mkdir -p data reports");
 
     int fd = open(ipc_path, O_RDWR | O_CREAT | O_TRUNC, 0666);
@@ -230,7 +230,7 @@ int main(int argc, char *argv[]) {
             if (ipc->job_queue.count == 0 && ipc->job_queue.jobs_in_progress == 0) {
                 joburi_gata = true;
                 
-                // --- MODIFICARE T4: Semnalizare corectă workerilor ---
+                // semnalizare corecta foldere
                 ipc->terminate_flag = true; 
 
                 printf("[Manager] Scanarea e gata. Se trimite semnal de terminare workerilor.\n");
