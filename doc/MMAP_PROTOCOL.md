@@ -1,30 +1,30 @@
-# Protocolul de Comunicare IPC (Memory-Mapped)
+# Protocolul de Comunicare IPC (Memory Mapped)
 
-Acest document descrie mecanismul de comunicare multiproces utilizat în Tema 4 pentru coordonarea între procesul Manager și procesele Worker.
+Acest document descrie modul in care procesul manager si procesele worker comunica si se sincronizeaza prin intermediul unui fisier mapat in memorie cu `mmap()` si flag-ul `MAP_SHARED`. 
 
-## 1. Structura Memoriei Partajate (`ipc_shared_t`)
-Memoria partajată este mapată folosind `mmap` cu flag-ul `MAP_SHARED` peste un fișier fizic situat în `data/ipc.mmap`. Layout-ul este segmentat în trei zone principale:
+Layout-ul fisierului IPC este proiectat sa fie stabil, ferit de race conditions si sa ofere mecanisme de backpressure.
 
-### A. Coada de Job-uri (`job_queue_t`)
-Este o coadă circulară (Ring Buffer) globală.
-- **Capacitate:** 256 de intrări (`JOB_QUEUE_CAPACITY`).
-- **Rol:** Managerul introduce directorul rădăcină; Workerii consumă job-uri și introduc subdirectoarele descoperite.
+## Structura globala a memoriei (Layout)
+Memoria mapata contine o singura instanta de tip `ipc_shared_t`, care este delimitata in felul urmator:
 
-### B. Canalele de Rezultate (`result_channels`)
-Fiecare worker (până la `MAX_WORKERS=16`) are un canal dedicat de tip `result_channel_t`.
-- **Capacitate:** 64 de înregistrări per canal (`RESULT_CHANNEL_CAPACITY`).
-- **Design:** Această separare elimină contenția pe semafoare, permițând scrieri simultane din partea workerilor.
+1. **IPC Header**: Contine date de identificare (`magic` setat pe "IPC4"), versiunea, numarul de workeri si un semafor general `header_mutex`. Mai contine si variabila `terminate_flag`, folosita de manager ca sa opreasca ordonat workerii.
+2. **Job Queue (Coada de directoare)**: Un singur Ring Buffer (buffer circular) comun, protejat prin semafoare, unde se pun directoarele ce urmeaza a fi scanate.
+3. **Canale de Rezultate (Result Channels)**: Un array de Ring Buffers, cate unul **pentru fiecare worker**. Fiecare worker scrie doar pe canalul lui, iar managerul citeste din toate. 
+4. **Worker Stats**: Un array de structuri actualizate in timp real de catre workeri cu informatii despre performanta (fisiere procesate, CPU etc.).
 
-### C. Statisticile Workerilor (`worker_stats_t`)
-Tablou de structuri unde workerii scriu în timp real PID-ul, numărul de fișiere procesate și timpii de execuție (Wall/User/Sys).
+## Principiul de Buffer Circular (Ring Buffer)
+Toate cozile de date sunt implementate ca buffere circulare. Exista un vector de marime fixa, un index `head` (urmatoarea citire) si un `tail` (urmatoarea scriere). Ele avanseaza mereu cu operatia *modulo capacitatea cozii*. Cand un index atinge capacitatea maxima, se intoarce automat la indexul 0.
 
-## 2. Sincronizare și Backpressure
-Sincronizarea este realizată strict prin semafoare POSIX anonime:
+## Sincronizarea si Backpressure-ul
+Pentru a preveni coruperea cozilor si a implementa regula de backpressure, se folosesc semafoare POSIX direct in zona partajata:
 
-- **Excludere Mutuală (Mutex):** Fiecare structură de tip coadă/canal are un semafor binar `mutex` care protejează pointerii de `head`, `tail` și contorul `count`.
-- **Backpressure:** Implementat prin semaforul `slots_libere` (inițializat cu capacitatea buffer-ului). Dacă un producător (Manager sau Worker) încearcă să adauge date într-un buffer plin, acesta este blocat de sistemul de operare până când un consumator eliberează un slot.
-- **Notificare Consumator:** Realizată prin semaforul `slots_ocupate`, care trezește procesul consumator imediat ce datele sunt disponibile.
+* **Evitarea Overflow-ului (Backpressure)**: Fiecare coada are un semafor `slots_libere`. Producatorul ii da `sem_wait`. Daca bufferul e plin (0 slots_libere), producatorul se blocheaza din executie. Asta garanteaza ca un worker nu va pierde si nu va suprascrie date daca managerul citeste prea incet.
+* **Evitarea Underflow-ului**: Fiecare coada are un semafor `slots_ocupate`. Consumatorul da `sem_wait`. Daca e 0, asteapta in liniste pana apare ceva pe teava.
+* **Excluderea mutuala**: Modificarea variabilelor `head`, `tail` sau `count` se face mereu incadrata de `sem_wait(&mutex)` si `sem_post(&mutex)`.
 
-## 3. Condiția de Terminare
-Sistemul folosește o regulă de terminare deterministă:
-Scanarea se consideră finalizată atunci când `job_queue.count == 0` ȘI `job_queue.jobs_in_progress == 0`. În acel moment, Managerul setează `terminate_flag = true` și „trezește” toți workerii blocați prin postări succesive pe semaforul de job-uri.
+## Mecanismul de Oprire Determinista
+Managerul considera ca scanarea e gata cand ambele conditii sunt indeplinite simultan in sectiunea critica a cozii de job-uri:
+1. `count == 0` (Nu mai e nimic in asteptare).
+2. `jobs_in_progress == 0` (Niciun worker nu mai scaneaza fizic vreo ramura pe disc).
+
+Atunci, managerul seteaza `terminate_flag = true` si le face post workerilor adormiti pe semaforul de citire ca sa poata evalua steagul si sa isi dea `exit()`.

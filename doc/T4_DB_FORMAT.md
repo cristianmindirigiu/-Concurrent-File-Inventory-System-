@@ -1,39 +1,34 @@
-# Formatul Bazei de Date Binare (INV4)
 
-Documentația descrie formatul binar de persistență al inventarului de fișiere, versiunea 4.
+# Formatul Bazei de Date Binare Finale (Inventory DB)
 
-## 1. Layout-ul Fișierului `inventory.db`
-Fișierul este compus din trei secțiuni consecutive, scrise binar:
+Baza de date produsa de procesul manager (workerii nu scriu direct in ea) salveaza o imagine (snapshot) a tututor fisierelor regulate descoperite de sistem pe disc.
 
-1. **Header (`inv4_header_t`)**: 21 bytes.
-2. **File Records (`file_record_t`[])**: Lungime variabilă ($N \times 1112$ bytes).
-3. **Worker Stats (`inv4_worker_stat_t`[])**: Lungime fixă în funcție de $N$ workeri ($W \times 80$ bytes).
+## 1. Reguli de generare si Atomicitiate
+Pentru ca fisierul `.db` sa fie mereu viabil si sa nu prindem baze de date trunchiate (ex. daca pica managerul la jumatatea operatiei), scrierea se face 100% **atomic**.
+Managerul creeaza mai intai un fisier temporar (`data/inventory.db.tmp`). Dupa ce toata scrierea s-a terminat cu succes si am pus flag-ul de complet, abia la sfarsit se face `rename()` peste fisierul original.
 
-## 2. Detalii Structuri
+## 2. Layout Baza de Date
+Formatul este extrem de liniar, gandit pentru parsare secventiala simpla in cod C (`fread` si `fwrite`):
 
-### Header
-- `magic`: 4 bytes, trebuie să fie exact `"INV4"`.
-- `format_version`: 4 bytes (uint32_t), fixat la `1`.
-- `complete`: 1 byte (uint8_t). Valoarea `1` indică o scriere atomică reușită.
-- `file_record_count`: 8 bytes (uint64_t), numărul total de fișiere.
-- `worker_count`: 4 bytes (uint32_t), numărul de procese care au contribuit.
+### A. Header Minim
+Se gaseste fix la offset-ul `0` (inceputul fisierului) si e dat de structura `inv4_header_t`.
+- `magic`: Sirul "INV4". Daca nu e INV4, aplicatia da direct abort.
+- `format_version`: Este `1`.
+- `complete`: Flag ce indica ca exportul s-a terminat ok. Initial e 0 pe parcursul salvarii fisierului `.tmp`, apoi devine 1 inainte de `rename()`. Poate ramane `0` daca se planuieste oprirea executiei pentru extensia din Tema 5.
+- `file_record_count`: Numarul exact de fisiere inregistrate mai jos.
+- `worker_count`: Cati workeri au contribuit cu munca.
 
-### File Record
-Fiecare intrare conține:
-- `path`: Calea absolută (max 1024 caractere).
-- `size`: Dimensiunea în bytes.
-- `mtime`: Timestamp-ul ultimei modificări.
-- `sha256`: Hash-ul calculat în format Hex (64 caractere + null terminator).
+### B. Inregistrarile de Fisiere (File Records)
+Imediat dupa header urmam array-ul de tip `file_record_t`, pus unul dupa altul exact `file_record_count` ori. 
+Fiecare bloc contine calea integrala a fisierului, informatii din structura POSIX `stat` (dimensiune, timestamp modificare, uid/gid) si semnatura criptografica SHA256 calculata in format hexazecimal (string).
 
-### Worker Stats (Trailer)
-Conține metricele de performanță: PID, Exit Status, Jobs processed, Files emitted, Bytes sum și timpii CPU (User/Sys) colectați prin `getrusage`.
+### C. Statisticile de la Workeri (Trailer/Worker Stats)
+La coada bazei de date (sau imediat dupa ultima inregistrare fisier), scriem un sir de structuri `inv4_worker_stat_t`, fix `worker_count` de multe ori.
+Aceasta zona raporteaza cate joburi/fisiere/bytes a inghitit fiecare worker individual. Foarte important, raporteaza timpii preluati intern din `getrusage()` (User CPU Time, Sys CPU Time) si durata Wall Time.
 
-## 3. Limite și Validitate
-- **Limita de căi:** 1024 caractere. Căile mai lungi sunt trunchiate.
-- **Validitate:** Un fișier DB este considerat valid dacă:
-    1. Magic number-ul este corect.
-    2. Flag-ul `complete` este `1`.
-    3. Dimensiunea fizică a fișierului corespunde cu: `sizeof(header) + count * sizeof(record) + workers * sizeof(stats)`.
-
-## 4. Garanții de Integritate
-Scrierea este **atomică**. Managerul scrie datele într-un fișier temporar `data/inventory.db.tmp` și folosește apelul de sistem `rename()` pentru a înlocui baza de date veche doar după ce scrierea a fost finalizată cu succes.
+## 3. Criterii de Validitate (`--verify`)
+Comanda de validare a manager-ului declara baza de date ca fiind corupta sau invalida daca:
+- Header-ul nu se poate citi complet.
+- Codul magic nu este perfect identic cu "INV4".
+- Flag-ul `complete` nu este `1`.
+- Marimea totala a fisierului calculata din structurile de operare nu "bate" cu marimea fizica in bytes a bazei de date (formula cu sizeof adunate).

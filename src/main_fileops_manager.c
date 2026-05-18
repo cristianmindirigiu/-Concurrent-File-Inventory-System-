@@ -242,7 +242,7 @@ int main(int argc, char *argv[]) {
             if (ipc->job_queue.count == 0 && ipc->job_queue.jobs_in_progress == 0) {
                 joburi_gata = true;
                 
-                
+                // semnalizare corecta foldere
                 ipc->terminate_flag = true; 
 
                 printf("[Manager] Scanarea e gata. Se trimite semnal de terminare workerilor.\n");
