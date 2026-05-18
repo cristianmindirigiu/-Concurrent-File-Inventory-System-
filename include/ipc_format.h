@@ -1,10 +1,4 @@
-/**
- * @file ipc_format.h
- * @brief Definițiile structurilor pentru memoria partajată (IPC) și baza de date binară.
- * * Acest fișier definește layout-ul memoriei mapate (mmap) folosite pentru 
- * comunicarea între procesul Manager și procesele Worker. Utilizează semafoare
- * POSIX pentru sincronizare și buffer-uri circulare (Ring Buffers) pentru transferul de date.
- */
+//acest fisier defineste layout-ul memoriei mapate folosite pentru comunicarea intre procesul Manager si procesul Worker si utilizeaza semafoare POSIX pentru sincronizare
 
 #ifndef IPC_FORMAT_H
 #define IPC_FORMAT_H
@@ -13,83 +7,67 @@
 #include <stdbool.h>
 #include <semaphore.h>
 
-#define IPC_VERSION 1  // Versiunea formatului IPC
-#define MAX_PATH_LEN 1024  // Lungime maximă cale fișier
-#define MAX_WORKERS 16  // Numărul maxim de workeri suportați
-#define JOB_QUEUE_CAPACITY 256  // Capacitatea cozii de directoare
-#define RESULT_CHANNEL_CAPACITY 64  // Capacitatea canalului de rezultate per worker
-#define SHA256_HEX_LEN 65  // 64 caractere hex + terminatorul '\0'
+#define IPC_VERSION 1  //versiunea formatului ipc
+#define MAX_PATH_LEN 1024  //lungime maxima cale fisier
+#define MAX_WORKERS 16  //numarul maxim de workeri
+#define JOB_QUEUE_CAPACITY 256  //cate job-uri pot sta in coada
+#define RESULT_CHANNEL_CAPACITY 64  //cate records in canalul fiecarui worker
+#define SHA256_HEX_LEN 65  //64 hex chars + '\0'
 
 #define INV4_MAGIC "INV4"
 #define INV4_VERSION 1
 
-/**
- * @struct file_record_t
- * @brief Reține metadatele unui fișier descoperit în timpul scanării.
- */
+//retine metadatele unui fisier descoperit in timpul scanarii
 typedef struct { 
-    char path[MAX_PATH_LEN]; // Calea absolută
-    uint64_t size; // Mărime în bytes
-    int64_t mtime; // Timestamp al ultimei modificări
-    uint32_t mode; // Permisiunile din struct stat
-    uint32_t uid; // User ID
-    uint32_t gid; // Group ID
+    char path[MAX_PATH_LEN]; //calea absoluta
+    uint64_t size; // Marime in bytes
+    int64_t mtime; // timestamp al ultimei modificari
+    uint32_t mode; // permisiunile din struct stat
+    uint32_t uid; // user id
+    uint32_t gid; // group ID
     char sha256[SHA256_HEX_LEN]; // Hash SHA256
 } file_record_t;
 
-/**
- * @struct job_t
- * @brief Reprezintă un task (director de scanat) din coada de job-uri.
- */
+
 typedef struct {
-    char path[MAX_PATH_LEN]; // Calea absolută a directorului
-    uint32_t depth; // Adâncimea curentă în arbore
+    char path[MAX_PATH_LEN]; // calea absoluta a directorului
+    uint32_t depth; // adancimea curenta in arbore
 } job_t;
 
-/**
- * @struct worker_stats_t
- * @brief Reține metricele de performanță în timp real pentru un worker.
- */
+//statistici worker
 typedef struct {
-    uint32_t worker_id; // ID-ul logic (0, 1, 2...)
-    int32_t pid; // PID-ul procesului
-    int32_t exit_status; // Codul de ieșire al workerului
+    uint32_t worker_id; //id-ul logic (0,1,..)
+    int32_t pid; // pid proces
+    int32_t exit_status; //codul de iesire al workerului
  
-    uint64_t jobs_processed; // Număr de directoare procesate
-    uint64_t files_emitted; // Număr de fișiere (file_records) trimise
-    uint64_t bytes_sum; // Suma dimensiunilor fișierelor
+    uint64_t jobs_processed; //nr de directoare procesate
+    uint64_t files_emitted; //nr de fisiere trimise
+    uint64_t bytes_sum; //suma size-urilor fisierelor
      
-    uint64_t time_ms; // Timp de execuție real (Wall time) în ms
-    uint64_t user_cpu_t; // Timp CPU în User Mode (microsecunde)
-    uint64_t sys_cpu_t; // Timp CPU în Kernel Mode (microsecunde)
+    uint64_t time_ms; //timp de executie real in ms
+    uint64_t user_cpu_t; //timp cpu user in ms
+    uint64_t sys_cpu_t; //timp cpu kernel in ms
 
-    bool active; // Flag care indică dacă workerul mai este în execuție
+    bool active; //daca workerul mai ruleaza
 } worker_stats_t;
 
-/**
- * @struct job_queue_t
- * @brief Buffer circular (Producer-Consumer) pentru directoarele ce trebuie scanate.
- * @note Este protejat de `mutex` și controlat prin semafoarele `slots_libere` și `slots_ocupate`.
- */
+//coada de directoare de scanat
 typedef struct {
-    job_t buffer[JOB_QUEUE_CAPACITY]; // Array fix de job-uri
+    job_t buffer[JOB_QUEUE_CAPACITY]; //array fix de joburi
 
-    uint32_t head; // Indexul următoarei citiri
-    uint32_t tail; // Indexul următoarei scrieri
-    uint32_t count; // Câte job-uri sunt active în coadă
+    uint32_t head; //indexul urmatoarei citiri
+    uint32_t tail; //indexul urmatoarei scrieri
+    uint32_t count; //cate joburi sunt in coada
 
-    sem_t mutex; // Asigură excluderea mutuală pentru head, tail și count
-    sem_t slots_libere; // Contorizează locurile libere (evită overflow)
-    sem_t slots_ocupate; // Contorizează job-urile disponibile (evită underflow)
+    sem_t mutex; //exclusiv pentru head tail count
+    sem_t slots_libere; //numar locuri libere
+    sem_t slots_ocupate; //numar locuri ocupate
 
-    uint32_t jobs_in_progress; // Numărul de workeri care scanează activ un director
+    uint32_t jobs_in_progress; //cati workeri lucreaza acum
 } job_queue_t;
 
-/**
- * @struct result_channel_t
- * @brief Canal de comunicare (1-la-1) între un Worker specific și Manager.
- * @note Fiecare worker scrie doar în canalul său, eliminând contenția (blocajele).
- */
+
+//canal de file_records pentru un worker (fiecare worker scrie in zona lui apoi managerul citeste din toate)
 typedef struct { 
     file_record_t buffer[RESULT_CHANNEL_CAPACITY];
        
@@ -101,48 +79,42 @@ typedef struct {
     sem_t slots_libere;
     sem_t slots_ocupate;
     
-    bool closed; // Setat pe true de worker la terminarea ciclului de viață
+    bool closed; //worker seteaza true cand termina
 } result_channel_t;
 
-/**
- * @struct ipc_shared_t
- * @brief Structura principală mapată în memoria partajată.
- */
+
+
 typedef struct {
-    // --- Header ---    
-    char magic[4]; // Fixat la "IPC4" pentru validare
+    //header    
+    char magic[4]; //fixat la "IPC4" pentru validare
     uint32_t version;
     uint32_t num_workers;
-    bool terminate_flag; // Semnal universal de oprire
+    bool terminate_flag;//semnal de oprire
 
-    // --- Sincronizare Globală ---
+    //sincronizare
     sem_t header_mutex;
 
-    // --- Conducte de Date ---
-    job_queue_t job_queue; // Canal Manager -> Workeri (și Worker -> Worker)
-    result_channel_t result_channels[MAX_WORKERS]; // Canale Workeri -> Manager
+    //job queue
+    job_queue_t job_queue;
 
-    // --- Statistici ---
+    //rezultate per worker
+    result_channel_t result_channels[MAX_WORKERS];
+
+    //statistici per worker
     worker_stats_t worker_stats[MAX_WORKERS]; 
 } ipc_shared_t;
 
-// structuri pentru baza de data binara
-/**
- * @struct inv4_header_t
- * @brief Antetul fișierului binar generat la finalul inventarierii.
- */
+// structuri pentru db
+// header-ul db-ului final
 typedef struct {
-    char magic[4]; // Fixat la "INV4"
-    uint32_t format_version; // Versiunea formatului (1)
-    uint8_t complete; // 0 - în progres, 1 - valid/finalizat
-    uint64_t file_record_count; // Numărul total de fișiere persistate
-    uint32_t worker_count; // Numărul de workeri utilizați
+    char magic[4]; //INV4
+    uint32_t format_version; // 1
+    uint8_t complete; //0 - in progres , 1 - e gata
+    uint64_t file_record_count; // nr fisiere
+    uint32_t worker_count; //nr workeri
 } inv4_header_t;
 
-/**
- * @struct inv4_worker_stat_t
- * @brief Trailer-ul cu statisticile finale ale fiecărui worker, stocat la finalul DB-ului.
- */
+// statistici per worker in db
 typedef struct {
     uint32_t worker_id;
     int32_t pid;
