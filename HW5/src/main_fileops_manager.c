@@ -41,6 +41,8 @@ int main(int argc, char *argv[]) {
     bool do_dump = false;
     int pipe_fds[MAX_WORKERS][2]; //arrayu de pipeuri
     char *pid_file = NULL;
+    int graceful_timeout = 5; // implicit 5 secunde
+    pid_t worker_pids[MAX_WORKERS];
     
     // 1. Analiza argumentelor CLI
     for (int i = 1; i < argc; i++) {
@@ -54,6 +56,7 @@ int main(int argc, char *argv[]) {
         else if (strcmp(argv[i], "--verify") == 0) do_verify = true;
         else if (strcmp(argv[i], "--dump") == 0) do_dump = true;
         else if (strcmp(argv[i], "--pid-file") == 0 && i + 1 < argc) pid_file = argv[++i];
+        else if (strcmp(argv[i], "--graceful-timeout") == 0 && i + 1 < argc) graceful_timeout = atoi(argv[++i]);
     }
     
     //VERIFY - verific magic, versiunea, complete si dimensiunea fisierului
@@ -287,8 +290,11 @@ int main(int argc, char *argv[]) {
             execl("./bin/fileops_worker", "fileops_worker", "--worker-id", id_str, "--ipc", ipc_path, "--max-depth", depth_str, "--control-fd", fd_str, NULL);
             perror("[Manager-Fiu] Eroare execl");
             exit(1);
-        }				
-	close(pipe_fds[i][1]); //inchid capatul  de scriere
+        }			
+        // proces parinte
+        worker_pids[i] = pid;
+        ipc->worker_stats[i].pid = pid;
+	    close(pipe_fds[i][1]); //inchid capatul  de scriere
     }
     
     int workeri_activi = num_workers;
@@ -305,6 +311,7 @@ int main(int argc, char *argv[]) {
 
     printf("[Manager] Incep monitorizarea canalelor IPC...\n");
 
+    bool shutdown_initiat = false;
     while (workeri_activi > 0) {
         // verificam SIGUSR1 - afisam STATUS
         if (got_sigusr1) {
@@ -322,10 +329,48 @@ int main(int argc, char *argv[]) {
                    qj, aj, fisiere_gasite, alive);
             fflush(stdout);
         }
+        // verificam SIGINT/SIGTERM - shutdown grațios
+        if (got_shutdown && !shutdown_initiat) {
+            shutdown_initiat = true;
+            printf("[Manager] Shutdown initiat, trimit SIGTERM workerilor\n");
+
+            // setam terminate_flag in IPC
+            ipc->terminate_flag = true;
+            // trezim workerii blocati pe semafoare
+            for (int j = 0; j < num_workers; j++) {
+                sem_post(&ipc->job_queue.slots_ocupate);
+            }
+            // trimitem SIGTERM fiecarui worker activ
+            for (int i = 0; i < num_workers; i++) {
+                if (ipc->worker_stats[i].active) {
+                    kill(worker_pids[i], SIGTERM);
+                }
+            }
+        }
+
+        // daca s-a initiat shutdown, verificam timeout
+        if (shutdown_initiat) {
+            static time_t shutdown_start = 0;
+            if (shutdown_start == 0) shutdown_start = time(NULL);
+
+            time_t elapsed = time(NULL) - shutdown_start;
+            if (elapsed >= graceful_timeout) {
+                // trimitem SIGKILL la restantierii care inca mai ruleaza
+                for (int i = 0; i < num_workers; i++) {
+                    if (ipc->worker_stats[i].active) {
+                        printf("[Manager] Timeout expirat, SIGKILL catre worker %d (PID %d)\n",
+                               i, ipc->worker_stats[i].pid);
+                        kill(worker_pids[i], SIGKILL);
+                    }
+                }
+                break; // iesim din bucla
+            }
+        }
         bool idle = true; //pp ca nu avem ce face tura asta
 	
 	//verificam daca e timpul sa trimitem semnalul de terminare a cautarii
-        if (!joburi_gata) {
+        // verificare terminare normala (fara shutdown)
+        if (!joburi_gata && !shutdown_initiat) {
             sem_wait(&ipc->job_queue.mutex);
             if (ipc->job_queue.count == 0 && ipc->job_queue.jobs_in_progress == 0) {
                 joburi_gata = true;
