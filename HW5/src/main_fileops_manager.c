@@ -8,6 +8,28 @@
 #include <fcntl.h>
 #include "../include/ipc_format.h"
 #include <limits.h>
+#include <signal.h>
+
+// flag-uri volatile setate din signal handlere
+static volatile sig_atomic_t got_sigusr1 = 0;
+static volatile sig_atomic_t got_shutdown = 0;
+static volatile sig_atomic_t got_sigchld = 0;
+
+// handlere de semnale (doar seteaza flag-uri)
+static void handler_sigusr1(int sig) {
+    (void)sig;
+    got_sigusr1 = 1;
+}
+
+static void handler_shutdown(int sig) {
+    (void)sig;
+    got_shutdown = 1;
+}
+
+static void handler_sigchld(int sig) {
+    (void)sig;
+    got_sigchld = 1;
+}
 
 int main(int argc, char *argv[]) {
     char *root_dir = NULL;
@@ -133,7 +155,22 @@ int main(int argc, char *argv[]) {
     // asiguram crearea folderelor
     system("mkdir -p data reports");
 
+    // instalare handlere semnale
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
 
+    sa.sa_handler = handler_sigusr1;
+    sa.sa_flags = SA_RESTART;
+    sigaction(SIGUSR1, &sa, NULL);
+
+    sa.sa_handler = handler_shutdown;
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
+
+    sa.sa_handler = handler_sigchld;
+    sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
+    sigaction(SIGCHLD, &sa, NULL);
+    
     //2 . initializarea memoriei partajate IPC
     int fd = open(ipc_path, O_RDWR | O_CREAT | O_TRUNC, 0666);
     if (fd == -1) { perror("[Manager] Eroare creare fisier IPC"); return 1; }
