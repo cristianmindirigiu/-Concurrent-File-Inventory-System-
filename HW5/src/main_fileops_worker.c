@@ -30,7 +30,9 @@ void compute_sha256(const char *path, char *output_buffer) {
 }
 
 // Functia principala in care worker-ul isi face treaba propriu-zisa: scaneaza un director dat ca job
-void scaneaza_director(ipc_shared_t* ipc, job_t job, uint32_t max_depth, int worker_id){
+void scaneaza_director(ipc_shared_t* ipc, job_t job, uint32_t max_depth, int worker_id, int control_fd){
+    uint64_t fisiere_in_job = 0;
+    uint64_t bytes_in_job = 0;
     DIR* dir = opendir(job.path); 
     if(dir == NULL){
         perror("Eroare deschidere director");
@@ -94,6 +96,8 @@ void scaneaza_director(ipc_shared_t* ipc, job_t job, uint32_t max_depth, int wor
             // Actualizam statisticile noastre interne direct in memoria partajata
             ipc->worker_stats[worker_id].files_emitted++;
             ipc->worker_stats[worker_id].bytes_sum += st.st_size;
+	    fisiere_in_job++;
+	    bytes_in_job += st.st_size;
 
             // Daca canalul asta e plin, worker-ul asteapta  aici
             // Nu merge mai departe pana nu consuma managerul din rezultate
@@ -109,6 +113,11 @@ void scaneaza_director(ipc_shared_t* ipc, job_t job, uint32_t max_depth, int wor
         }
     }
     closedir(dir);
+
+    //scriere mesaj
+    char buf[512];
+    int len = snprintf(buf, sizeof(buf), "T5MSG type=JOB_DONE worker_id=%d jobs=%lu files=%lu bytes=%lu\n", worker_id, ipc->worker_stats[worker_id].jobs_processed, fisiere_in_job, bytes_in_job);
+    write(control_fd, buf, len);
 }
 
 int main(int argc, char *argv[]) {
@@ -119,7 +128,7 @@ int main(int argc, char *argv[]) {
     int worker_id = -1;
     char *ipc_path = NULL;
     uint32_t max_depth = UINT32_MAX; 
-    
+    int control_fd = -1; 
     // Citim si parsam ce parametri ne-a pasat managerul la fork + exec
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--worker-id") == 0 && i + 1 < argc) worker_id = atoi(argv[++i]);
@@ -193,7 +202,7 @@ int main(int argc, char *argv[]) {
         ipc->worker_stats[worker_id].jobs_processed++;
         
         // Aici facem treaba fizic
-        scaneaza_director(ipc, my_job, max_depth, worker_id);
+        scaneaza_director(ipc, my_job, max_depth, worker_id, control_fd);
         
         // Marcam ca am terminat cu folderul asta
         sem_wait(&ipc->job_queue.mutex);
