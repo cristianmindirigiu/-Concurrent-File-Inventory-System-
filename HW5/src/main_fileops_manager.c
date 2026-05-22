@@ -39,7 +39,7 @@ int main(int argc, char *argv[]) {
     int max_depth = -1; //nespecificat - valoarea negativa = lipsa argument
     bool do_verify = false;
     bool do_dump = false;
-    int pipe_fds[MAX_WORKERS][2] //arrayu de pipeuri
+    int pipe_fds[MAX_WORKERS][2]; //arrayu de pipeuri
     
     // 1. Analiza argumentelor CLI
     for (int i = 1; i < argc; i++) {
