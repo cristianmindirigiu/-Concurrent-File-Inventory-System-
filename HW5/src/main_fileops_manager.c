@@ -40,6 +40,7 @@ int main(int argc, char *argv[]) {
     bool do_verify = false;
     bool do_dump = false;
     int pipe_fds[MAX_WORKERS][2]; //arrayu de pipeuri
+    char *pid_file = NULL;
     
     // 1. Analiza argumentelor CLI
     for (int i = 1; i < argc; i++) {
@@ -52,6 +53,7 @@ int main(int argc, char *argv[]) {
         }
         else if (strcmp(argv[i], "--verify") == 0) do_verify = true;
         else if (strcmp(argv[i], "--dump") == 0) do_dump = true;
+        else if (strcmp(argv[i], "--pid-file") == 0 && i + 1 < argc) pid_file = argv[++i];
     }
     
     //VERIFY - verific magic, versiunea, complete si dimensiunea fisierului
@@ -154,6 +156,17 @@ int main(int argc, char *argv[]) {
 
     // asiguram crearea folderelor
     system("mkdir -p data reports");
+
+    // scriem PID-ul in fisier daca s-a cerut
+    if (pid_file) {
+        FILE *pf = fopen(pid_file, "w");
+        if (pf) {
+            fprintf(pf, "%d\n", getpid());
+            fclose(pf);
+        } else {
+            perror("[Manager] Eroare scriere pid-file");
+        }
+    }
 
     // instalare handlere semnale
     struct sigaction sa;
@@ -293,6 +306,22 @@ int main(int argc, char *argv[]) {
     printf("[Manager] Incep monitorizarea canalelor IPC...\n");
 
     while (workeri_activi > 0) {
+        // verificam SIGUSR1 - afisam STATUS
+        if (got_sigusr1) {
+            got_sigusr1 = 0;
+            int alive = 0;
+            for (int i = 0; i < num_workers; i++) {
+                if (ipc->worker_stats[i].active) alive++;
+            }
+            sem_wait(&ipc->job_queue.mutex);
+            uint32_t qj = ipc->job_queue.count;
+            uint32_t aj = ipc->job_queue.jobs_in_progress;
+            sem_post(&ipc->job_queue.mutex);
+
+            printf("STATUS queued_jobs=%u active_jobs=%u files=%lu bytes=0 workers_alive=%d complete=0\n",
+                   qj, aj, fisiere_gasite, alive);
+            fflush(stdout);
+        }
         bool idle = true; //pp ca nu avem ce face tura asta
 	
 	//verificam daca e timpul sa trimitem semnalul de terminare a cautarii
@@ -437,6 +466,9 @@ int main(int argc, char *argv[]) {
         perror("[Manager] Eroare munmap");
     }
     free(all_records);
+
+    // stergem pid file daca exista
+    if (pid_file) unlink(pid_file);
 
     printf("[Manager] Toate procesele worker s-au terminat cu succes.\n");
     return 0;
