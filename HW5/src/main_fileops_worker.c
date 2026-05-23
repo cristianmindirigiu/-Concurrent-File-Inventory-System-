@@ -10,6 +10,17 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <errno.h>
+
+#include <signal.h>
+
+// flag volatile pentru SIGTERM
+static volatile sig_atomic_t got_sigterm = 0;
+
+static void handler_sigterm(int sig) {
+    (void)sig;
+    got_sigterm = 1;
+}
+
 // Functia asta cheama comanda de sistem sha256sum ca sa ne calculeze hash-ul fisierului
 // Folosim popen ca sa capturam output-ul comenzii direct intr-un buffer, fara sa mai scriem prin alte fisiere temporare.
 void compute_sha256(const char *path, char *output_buffer) {
@@ -44,6 +55,8 @@ void scaneaza_director(ipc_shared_t* ipc, job_t job, uint32_t max_depth, int wor
     struct dirent* entry;
     // Citim element cu element din director
     while((entry = readdir(dir)) != NULL){
+        // verificam daca am primit SIGTERM in timp ce scanam
+        if (got_sigterm) break;
         // Ignoram folderele parinte si curente ca sa nu facem bucle infinite
         if(strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0){
             continue;
@@ -145,6 +158,13 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    // instalare handler SIGTERM
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = handler_sigterm;
+    sa.sa_flags = 0;
+    sigaction(SIGTERM, &sa, NULL);
+
     // Deschidem fisierul comun de memorie (IPC) 
     int fd = open(ipc_path, O_RDWR);
     if (fd == -1) { 
@@ -171,6 +191,9 @@ int main(int argc, char *argv[]) {
     // Bucla principala de viata a worker-ului (consumator de job-uri)
     job_t my_job;
     while(1){
+        // verificam SIGTERM
+        if (got_sigterm) break;
+
         sem_wait(&ipc->job_queue.mutex);
         
         // Daca managerul a ridicat steagul de terminare, iesim direct afara
@@ -210,6 +233,9 @@ int main(int argc, char *argv[]) {
         sem_wait(&ipc->job_queue.mutex);
         ipc->job_queue.jobs_in_progress--;
         sem_post(&ipc->job_queue.mutex);
+
+        // inca un check la final de tura
+        if (got_sigterm) break;
     }
     
     // Ne calculam consumul de CPU si timpul total
@@ -228,8 +254,9 @@ int main(int argc, char *argv[]) {
     sem_post(&ipc->result_channels[worker_id].slots_ocupate); // Il trezim o ultima data in caz ca dormea
 	
     //trimitere WORKER_EXITING pe pipe
+    const char *reason = got_sigterm ? "shutdown" : "normal";
     char buf[512];
-    int len = snprintf(buf, sizeof(buf), "T5MSG type=WORKER_EXITING worker_id=%d motiv=normal\n", worker_id);
+    int len = snprintf(buf, sizeof(buf), "T5MSG type=WORKER_EXITING worker_id=%d reason=%s\n", worker_id, reason);
     write(control_fd, buf, len);
 
     //inchidem pipeul de control
