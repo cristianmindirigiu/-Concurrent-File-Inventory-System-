@@ -30,7 +30,25 @@ static void handler_sigchld(int sig) {
     (void)sig;
     got_sigchld = 1;
 }
-
+// reap toti copiii terminati (apelat din bucla principala)
+static void reap_children(ipc_shared_t *ipc, int num_workers, int *workeri_terminati) {
+    int status;
+    pid_t pid;
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        for (int j = 0; j < num_workers; j++) {
+            if (ipc->worker_stats[j].pid == pid) {
+                if (WIFEXITED(status)) {
+                    ipc->worker_stats[j].exit_status = WEXITSTATUS(status);
+                } else if (WIFSIGNALED(status)) {
+                    ipc->worker_stats[j].exit_status = -1;
+                }
+                ipc->worker_stats[j].active = false;
+                break;
+            }
+        }
+        (*workeri_terminati)++;
+    }
+}
 int main(int argc, char *argv[]) {
     char *root_dir = NULL;
     int num_workers = 0;
@@ -318,7 +336,13 @@ int main(int argc, char *argv[]) {
     printf("[Manager] Incep monitorizarea canalelor IPC...\n");
 
     bool shutdown_initiat = false;
+    int workeri_terminati = 0;
     while (workeri_activi > 0) {
+        // verificam SIGCHLD - un worker a murit
+        if (got_sigchld) {
+            got_sigchld = 0;
+            reap_children(ipc, num_workers, &workeri_terminati);
+        }
         // verificam SIGUSR1 - afisam STATUS
         if (got_sigusr1) {
             got_sigusr1 = 0;
@@ -439,25 +463,26 @@ int main(int argc, char *argv[]) {
 
     printf("[Manager] Toate canalele au fost epuizate si inchise. Total fisiere receptionate: %lu\n", fisiere_gasite);
 
-    printf("[Manager] Colectam statusurile finale ale proceselor...\n");
-    for (int i = 0; i < num_workers; i++) {
+   // reap final - asteptam toti copiii care nu au fost inca colectati in bucla
+    while (workeri_terminati < num_workers) {
         int status;
-        pid_t child_pid = wait(&status);
-        
-        for(int j = 0; j < num_workers; j++) {
-            if (ipc->worker_stats[j].pid == child_pid) {
-                if (WIFEXITED(status)) {
+        pid_t pid = waitpid(-1, &status, 0);
+        if (pid <= 0) break;
+        for (int j = 0; j < num_workers; j++) {
+            if (ipc->worker_stats[j].pid == pid) {
+                if (WIFEXITED(status))
                     ipc->worker_stats[j].exit_status = WEXITSTATUS(status);
-                    printf("[Manager] Worker (PID: %d, ID: %d) s-a incheiat normal cu exit code %d.\n", child_pid, j, WEXITSTATUS(status));
-                } else {
+                else if (WIFSIGNALED(status))
                     ipc->worker_stats[j].exit_status = -1;
-                    printf("[Manager] Worker (PID: %d, ID: %d) s-a incheiat anormal.\n", child_pid, j);
-                }
                 ipc->worker_stats[j].active = false;
                 break;
             }
         }
+        workeri_terminati++;
     }
+
+    // verificam daca au mai ramas procese zombie ratacite
+    while (waitpid(-1, NULL, WNOHANG) > 0) { /* reap restante */ }
     
     //scrierea db-ului
     //scriu intr-un fisier temp apoi fac rename
