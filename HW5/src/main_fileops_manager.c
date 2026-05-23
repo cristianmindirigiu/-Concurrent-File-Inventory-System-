@@ -296,6 +296,12 @@ int main(int argc, char *argv[]) {
         ipc->worker_stats[i].pid = pid;
 	    close(pipe_fds[i][1]); //inchid capatul  de scriere
     }
+
+    //pipeurile = non-blocking
+    for(int i = 0; i < num_workers; i++){
+	    int flg = fcntl(pipe_fds[i][0], F_GETFL);
+	    fcntl(pipe_fds[i][0], F_SETFL, flg | O_NONBLOCK);
+    }
     
     int workeri_activi = num_workers;
     bool joburi_gata = false;
@@ -413,7 +419,21 @@ int main(int argc, char *argv[]) {
                 }
             }
         }
-        
+     
+        //sectiune de citire din pipe-uri
+	char pipe_buf[4096];
+	for(int i = 0; i < num_workers; i++){
+		if(pipe_fds[i][0] < 0) continue;
+		ssize_t n = read(pipe_fds[i][0], pipe_buf, sizeof(pipe_buf) - 1);
+		if(n>0){
+			pipe_buf[n] = '\0';
+		} else if (n==0){
+			close(pipe_fds[i][0]);
+			pipe_fds[i][0] = -1;
+		}
+	}	
+
+
         if (idle) usleep(1000); 
     }
 
