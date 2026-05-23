@@ -9,7 +9,7 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/resource.h>
-
+#include <errno.h>
 // Functia asta cheama comanda de sistem sha256sum ca sa ne calculeze hash-ul fisierului
 // Folosim popen ca sa capturam output-ul comenzii direct intr-un buffer, fara sa mai scriem prin alte fisiere temporare.
 void compute_sha256(const char *path, char *output_buffer) {
@@ -35,7 +35,9 @@ void scaneaza_director(ipc_shared_t* ipc, job_t job, uint32_t max_depth, int wor
     uint64_t bytes_in_job = 0;
     DIR* dir = opendir(job.path); 
     if(dir == NULL){
-        perror("Eroare deschidere director");
+        char buf[512];
+	int len = snprintf(buf, sizeof(buf), "T5MSG type=ERROR worker_id=%d errno=%d where=opendir\n", worker_id , errno);
+	write(control_fd, buf, len);
         return;
     }
     
@@ -224,7 +226,14 @@ int main(int argc, char *argv[]) {
     ipc->result_channels[worker_id].closed = true;
     sem_post(&ipc->result_channels[worker_id].mutex);
     sem_post(&ipc->result_channels[worker_id].slots_ocupate); // Il trezim o ultima data in caz ca dormea
+	
+    //trimitere WORKER_EXITING pe pipe
+    char buf[512];
+    int len = snprintf(buf, sizeof(buf), "T5MSG type=WORKER_EXITING worker_id=%d motiv=normal\n", worker_id);
+    write(control_fd, buf, len);
 
+    //inchidem pipeul de control
+    if(control_fd >= 0) close(control_fd);
     // Decuplam memoria partajata din spatiul procesului nostru
     if (munmap(ipc, sizeof(ipc_shared_t)) == -1) {
         perror("[Worker] Eroare munmap la iesire");

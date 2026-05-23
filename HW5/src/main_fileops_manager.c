@@ -9,7 +9,7 @@
 #include "../include/ipc_format.h"
 #include <limits.h>
 #include <signal.h>
-
+#include <time.h>
 // flag-uri volatile setate din signal handlere
 static volatile sig_atomic_t got_sigusr1 = 0;
 static volatile sig_atomic_t got_shutdown = 0;
