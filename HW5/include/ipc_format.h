@@ -18,8 +18,8 @@
 #define INV4_VERSION 1
 
 #define DB_START 0
-#define DB_PARTIAL_COMPLET 1
-#define DB_COMPLET 2
+#define DB_PART_COMPLETE 1
+#define DB_FULL_COMPLETE 2
 //retine metadatele unui fisier descoperit in timpul scanarii
 typedef struct { 
     char path[MAX_PATH_LEN]; //calea absoluta

@@ -455,6 +455,8 @@ int main(int argc, char *argv[]) {
 		ssize_t n = read(pipe_fds[i][0], pipe_buf, sizeof(pipe_buf) - 1);
 		if(n>0){
 			pipe_buf[n] = '\0';
+			printf("Manager: Pipe[%d]: %s", i, pipe_buf);
+			fflush(stdout);
 		} else if (n==0){
 			close(pipe_fds[i][0]);
 			pipe_fds[i][0] = -1;

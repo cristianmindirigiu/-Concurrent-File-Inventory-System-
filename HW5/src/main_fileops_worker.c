@@ -231,7 +231,10 @@ int main(int argc, char *argv[]) {
         
         // Contorizam job-ul
         ipc->worker_stats[worker_id].jobs_processed++;
-        
+       	//hearbeat
+	char buf[512];
+        int len = snprintf(buf, sizeof(buf), "T5MSG type=HEARTBEAT worker_id=%d\n", worker_id);
+	write(control_fd, buf, len);	
         // Aici facem treaba fizic
         scaneaza_director(ipc, my_job, max_depth, worker_id, control_fd, simulate_ms);
         

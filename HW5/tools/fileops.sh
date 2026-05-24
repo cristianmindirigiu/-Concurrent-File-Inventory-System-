@@ -139,7 +139,7 @@ cmd_build() {
         cale_main_obj="tmp/obj/${nume_baza%.c}.o"
 
         echo "[BUILD] Se genereaza executabilul: bin/$nume_exe"
-        gcc "$cale_main_obj" $MOD_AUXILIARE -o "bin/$nume_exe"
+        gcc "$cale_main_obj" $MOD_AUXILIARE -o "bin/$nume_exe" -lpthread
     done
 
     echo "[BUILD] SUCCES."
