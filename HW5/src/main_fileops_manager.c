@@ -61,6 +61,7 @@ int main(int argc, char *argv[]) {
     char *pid_file = NULL;
     int graceful_timeout = 5; // implicit 5 secunde
     pid_t worker_pids[MAX_WORKERS];
+    int simulate_work_ms = 0;
     
     // 1. Analiza argumentelor CLI
     for (int i = 1; i < argc; i++) {
@@ -75,6 +76,7 @@ int main(int argc, char *argv[]) {
         else if (strcmp(argv[i], "--dump") == 0) do_dump = true;
         else if (strcmp(argv[i], "--pid-file") == 0 && i + 1 < argc) pid_file = argv[++i];
         else if (strcmp(argv[i], "--graceful-timeout") == 0 && i + 1 < argc) graceful_timeout = atoi(argv[++i]);
+	else if (strcmp(argv[i], "--simulate-work-ms") == 0 && i + 1 < argc) simulate_work_ms = atoi(argv[++i]);
     }
     
     //VERIFY - verific magic, versiunea, complete si dimensiunea fisierului
@@ -305,7 +307,9 @@ int main(int argc, char *argv[]) {
             snprintf(id_str, sizeof(id_str), "%d", i);
 	    char fd_str[16];
 	    snprintf(fd_str, sizeof(fd_str), "%d", pipe_fds[i][1]);
-            execl("./bin/fileops_worker", "fileops_worker", "--worker-id", id_str, "--ipc", ipc_path, "--max-depth", depth_str, "--control-fd", fd_str, NULL);
+	    char sim_str[16];
+	    snprintf(sim_str, sizeof(sim_str), "%d", simulate_work_ms);
+            execl("./bin/fileops_worker", "fileops_worker", "--worker-id", id_str, "--ipc", ipc_path, "--max-depth", depth_str, "--control-fd", fd_str, "--simulate-work-ms", sim_str,  NULL);
             perror("[Manager-Fiu] Eroare execl");
             exit(1);
         }			

@@ -41,7 +41,7 @@ void compute_sha256(const char *path, char *output_buffer) {
 }
 
 // Functia principala in care worker-ul isi face treaba propriu-zisa: scaneaza un director dat ca job
-void scaneaza_director(ipc_shared_t* ipc, job_t job, uint32_t max_depth, int worker_id, int control_fd){
+void scaneaza_director(ipc_shared_t* ipc, job_t job, uint32_t max_depth, int worker_id, int control_fd, int simulate_ms){
     uint64_t fisiere_in_job = 0;
     uint64_t bytes_in_job = 0;
     DIR* dir = opendir(job.path); 
@@ -106,6 +106,10 @@ void scaneaza_director(ipc_shared_t* ipc, job_t job, uint32_t max_depth, int wor
             rec.uid = st.st_uid;
             rec.gid = st.st_gid;
             
+	    if(simulate_ms > 0){
+		    usleep(simulate_ms * 1000);
+	    }
+
             compute_sha256(full_path, rec.sha256);
 
             // Actualizam statisticile noastre interne direct in memoria partajata
@@ -144,6 +148,7 @@ int main(int argc, char *argv[]) {
     char *ipc_path = NULL;
     uint32_t max_depth = UINT32_MAX; 
     int control_fd = -1; 
+    int simulate_ms = 0;
     // Citim si parsam ce parametri ne-a pasat managerul la fork + exec
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--worker-id") == 0 && i + 1 < argc) worker_id = atoi(argv[++i]);
@@ -151,6 +156,7 @@ int main(int argc, char *argv[]) {
         else if (strcmp(argv[i], "--max-depth") == 0 && i + 1 < argc){
             max_depth = (uint32_t)atoi(argv[++i]);
         } else if (strcmp(argv[i], "--control-fd") == 0 && i + 1 < argc) control_fd = atoi(argv[++i]);
+	else if (strcmp(argv[i], "--simulate-work-ms") == 0 && i + 1 < argc) simulate_ms = atoi(argv[++i]);
     }
 
     if (worker_id == -1 || !ipc_path) {
@@ -227,7 +233,7 @@ int main(int argc, char *argv[]) {
         ipc->worker_stats[worker_id].jobs_processed++;
         
         // Aici facem treaba fizic
-        scaneaza_director(ipc, my_job, max_depth, worker_id, control_fd);
+        scaneaza_director(ipc, my_job, max_depth, worker_id, control_fd, simulate_ms);
         
         // Marcam ca am terminat cu folderul asta
         sem_wait(&ipc->job_queue.mutex);
