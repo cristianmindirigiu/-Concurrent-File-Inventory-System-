@@ -105,9 +105,9 @@ int main(int argc, char *argv[]) {
             fclose(f);
             return 1;
         }
-	//verif complete
-        if(h.complete!=1){
-            fprintf(stderr, "[Verify] Eroare, DB incomplet\n");
+	//verif complete 
+        if(h.complete != DB_PART_COMPLETE && h.complete != DB_FULL_COMPLETE){
+            fprintf(stderr, "[Verify] Eroare, DB incomplet (complete=%u)\n", h.complete);
             fclose(f);
             return 1;
         }
@@ -505,11 +505,14 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     
+    // decidem valoarea complete
+    uint8_t db_complete = shutdown_initiat ? DB_PART_COMPLETE : DB_FULL_COMPLETE;
+
     //construirea si scrierea header-ului
     inv4_header_t header;
     memcpy(header.magic, INV4_MAGIC, 4);
     header.format_version = INV4_VERSION;
-    header.complete = 0;
+    header.complete = DB_START; // scriem initial 0 pe parcursul lucrului
     header.file_record_count = total_records;
     header.worker_count = num_workers;
 
@@ -533,8 +536,8 @@ int main(int argc, char *argv[]) {
         fwrite(&ws , sizeof(inv4_worker_stat_t), 1, db_file);
     }
     
-    //setez complete = 1 si resetez headerul
-    header.complete = 1;
+    //setez statusul final corect si resetez headerul
+    header.complete = db_complete;
     rewind(db_file);
     fwrite(&header, sizeof(inv4_header_t), 1, db_file);
 	
@@ -545,7 +548,7 @@ int main(int argc, char *argv[]) {
         free(all_records);
         return 1;
     }
-    printf("[Manager] DB scris cu succes: %s (%lu records)\n", db_path, total_records);
+    printf("[Manager] DB scris cu succes: %s (%lu records, complete=%u)\n", db_path, total_records, db_complete);
 
     sem_destroy(&ipc->header_mutex);
     sem_destroy(&ipc->job_queue.mutex);
